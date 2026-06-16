@@ -1,0 +1,16 @@
+{"event":"project_boundary","ts":"2025-09-01T00:00:00Z","data":{"kind":"start","session_id":"s1","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-09-01T01:00:00Z","data":{"kind":"end","session_id":"s1","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-09-15T00:00:00Z","data":{"kind":"start","session_id":"s2","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-09-15T01:00:00Z","data":{"kind":"end","session_id":"s2","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-10-01T00:00:00Z","data":{"kind":"start","session_id":"s3","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-10-01T01:00:00Z","data":{"kind":"end","session_id":"s3","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-11-01T00:00:00Z","data":{"kind":"start","session_id":"s4","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-11-01T01:00:00Z","data":{"kind":"end","session_id":"s4","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-09-20T00:00:00Z","data":{"kind":"start","session_id":"s5","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2025-09-20T01:00:00Z","data":{"kind":"end","session_id":"s5","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2026-02-01T00:00:00Z","data":{"kind":"start","session_id":"s6","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2026-02-01T01:00:00Z","data":{"kind":"end","session_id":"s6","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2026-04-01T00:00:00Z","data":{"kind":"start","session_id":"s7","terminal_id":"t1"}}
+{"event":"project_boundary","ts":"2026-04-01T01:00:00Z","data":{"kind":"end","session_id":"s7","terminal_id":"t1"}}
+{"event":"cost_rollup","ts":"2025-10-01T00:30:00Z","data":{"session_id":"s3","model":"claude-haiku-4-5","input_tokens":0,"output_tokens":0}}
+{"event":"cost_rollup","ts":"2025-09-20T00:30:00Z","data":{"session_id":"s5","model":"claude-haiku-4-5","input_tokens":0,"output_tokens":0}}

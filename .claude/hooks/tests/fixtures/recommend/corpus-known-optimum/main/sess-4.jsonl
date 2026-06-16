@@ -1,0 +1,5 @@
+{"type":"user","ts":"2026-03-04T00:00:00Z","message":{"content":"hello"}}
+{"type":"assistant","ts":"2026-03-04T00:00:01Z","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":5000,"output_tokens":200,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"system","ts":"2026-03-04T00:00:02Z","message":{"compact_boundary":true,"isCompactSummary":true}}
+{"type":"user","ts":"2026-03-04T00:00:10Z","message":{"content":"world"}}
+{"type":"assistant","ts":"2026-03-04T00:00:11Z","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":2000,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}

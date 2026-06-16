@@ -1,0 +1,24 @@
+{
+  "_description": "Pinned-fit regression fixture for hierarchical-model.py --self-check --seed 42. Captures expected convergence metrics. Bambi 0.18.0 + nutpie 0.16.10 + PyMC 6.0.1, draw_diag adaptation, 2000 draws x 3000 tune x 4 chains.",
+  "gates_passed": true,
+  "r_hat_max": 1.0,
+  "ess_bulk_min": 1942,
+  "divergences": 0,
+  "sigma_workspace": {
+    "recovered": 1.029,
+    "truth": 1.0,
+    "rel_err": 0.029
+  },
+  "sigma_project": {
+    "recovered": 0.559,
+    "truth": 0.5,
+    "rel_err": 0.118
+  },
+  "sigma_residual": {
+    "recovered": 0.253,
+    "truth": 0.25,
+    "rel_err": 0.012
+  },
+  "seed": 42,
+  "tolerance": 0.15
+}

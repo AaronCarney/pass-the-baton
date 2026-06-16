@@ -1,0 +1,63 @@
+name: Checkpoint Tests
+
+on:
+  push:
+    paths:
+      - '.claude/hooks/**'
+      - 'lib/**'
+      - 'tools/**'
+      - 'share/**'
+      - 'docs/context-baton.md'
+      - 'docs/install.md'
+      - 'docs/telemetry.md'
+      - 'docs/cost-model.md'
+      - '.github/workflows/baton-tests.yml'
+      - 'requirements.txt'
+  pull_request:
+    paths:
+      - '.claude/hooks/**'
+      - 'lib/**'
+      - 'tools/**'
+      - 'share/**'
+      - 'docs/context-baton.md'
+      - 'docs/install.md'
+      - 'docs/telemetry.md'
+      - 'docs/cost-model.md'
+      - '.github/workflows/baton-tests.yml'
+      - 'requirements.txt'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update -y && sudo apt-get install -y jq util-linux coreutils
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+      - name: Run full test suite
+        run: |
+          set -uo pipefail
+          PASS=0; FAIL=0; FAILED_SUITES=""
+          for t in .claude/hooks/tests/test-*.sh; do
+            name=$(basename "$t")
+            echo ""
+            echo "=== $name ==="
+            if bash "$t"; then
+              PASS=$((PASS + 1))
+            else
+              FAIL=$((FAIL + 1))
+              FAILED_SUITES="$FAILED_SUITES $name"
+            fi
+          done
+          echo ""
+          echo "===================="
+          echo "Suites: $PASS passed, $FAIL failed"
+          if [ "$FAIL" -gt 0 ]; then
+            echo "Failed suites:$FAILED_SUITES"
+            exit 1
+          fi

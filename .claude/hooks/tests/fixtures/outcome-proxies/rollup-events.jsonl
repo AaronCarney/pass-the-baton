@@ -1,0 +1,11 @@
+{"ts":"2026-05-26T10:00:00Z","schema_version":1,"event":"project_boundary","data":{"slug":"slug-clean","kind":"start","workstream":"main","terminal_id":"term-c","session_id":"sess-clean","description":""}}
+{"ts":"2026-05-26T10:00:01Z","schema_version":1,"event":"project_boundary","data":{"slug":"slug-fired","kind":"start","workstream":"main","terminal_id":"term-f","session_id":"sess-fired","description":""}}
+{"ts":"2026-05-26T10:01:00Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"code_execution","success":true,"runner":"pytest","exit_code":0,"session_id":"sess-clean"}}
+{"ts":"2026-05-26T10:01:01Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"code_execution","success":true,"runner":"pytest","exit_code":0,"session_id":"sess-clean"}}
+{"ts":"2026-05-26T10:01:02Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"code_execution","success":false,"runner":"pytest","exit_code":1,"session_id":"sess-clean"}}
+{"ts":"2026-05-26T10:02:00Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"retry","similarity":0.8,"n_prior_prompts":1,"session_id":"sess-clean"}}
+{"ts":"2026-05-26T10:02:01Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"retry","similarity":0.9,"n_prior_prompts":2,"session_id":"sess-clean"}}
+{"ts":"2026-05-26T10:03:00Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"follow_up","slug":"slug-clean","n_sessions":3,"n_terminals":2,"mean_turns_per_session":12,"total_turns":36}}
+{"ts":"2026-05-26T10:04:00Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"commit_survival","slug":"slug-clean","window_days":14,"n_commits":4,"n_reverted":1,"n_survived":3,"survival_fraction":0.75}}
+{"ts":"2026-05-26T10:05:00Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"code_execution","success":true,"runner":"go-test","exit_code":0,"session_id":"sess-fired"}}
+{"ts":"2026-05-26T10:05:01Z","schema_version":1,"event":"outcome_proxy","data":{"subkind":"code_execution","success":false,"runner":"go-test","exit_code":2,"session_id":"sess-fired"}}

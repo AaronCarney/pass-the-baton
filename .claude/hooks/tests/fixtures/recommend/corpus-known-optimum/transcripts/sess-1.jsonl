@@ -1,0 +1,4 @@
+{"type":"user","ts":"2026-03-01T00:00:00Z","content":"hello"}
+{"type":"assistant","ts":"2026-03-01T00:00:01Z","content":"hi","compact_boundary":true}
+{"type":"user","ts":"2026-03-01T00:00:02Z","content":"world"}
+{"type":"assistant","ts":"2026-03-01T00:00:03Z","content":"done","usage":{"input_tokens":100,"output_tokens":50}}

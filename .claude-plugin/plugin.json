@@ -1,0 +1,11 @@
+{
+  "name": "pass-the-baton",
+  "description": "Save your Claude Code session at a context-fill threshold and resume it on the next session with the assignment auto-injected. Session-continuity hooks + skills, no cron required.",
+  "author": { "name": "Aaron Carney" },
+  "homepage": "https://github.com/AaronCarney/pass-the-baton",
+  "repository": "https://github.com/AaronCarney/pass-the-baton",
+  "license": "MIT",
+  "keywords": ["claude-code", "claude-plugin", "session-continuity", "checkpoint", "context-management"],
+  "hooks": "./hooks/hooks.json",
+  "skills": "./.claude/skills/"
+}

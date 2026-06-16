@@ -1,0 +1,21 @@
+# baton - logrotate(8) snippet.
+# Rotates telemetry envelope log under XDG_STATE_HOME.
+# Default path uses literal ~/.local/state to keep the snippet portable across
+# users on a system-wide install; logrotate expands ~ to root's home by default
+# when run by the system logrotate cron, so we expand it via "su" below.
+# Install: copy to /etc/logrotate.d/baton (root) or run on a per-user
+# cron via `logrotate -s ~/.cache/logrotate.state <this-file>`.
+
+~/.local/state/baton/telemetry.log {
+    daily
+    rotate 30
+    missingok
+    notifempty
+    compress
+    compresscmd /usr/bin/zstd
+    compressext .zst
+    compressoptions "-19 -T0 --rm"
+    delaycompress
+    copytruncate
+    su "$USER" "$USER"
+}

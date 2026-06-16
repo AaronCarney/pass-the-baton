@@ -1,0 +1,18 @@
+{
+  "template_id": "free",
+  "template_version": 1,
+  "required_sections": [
+    "Session Directive",
+    "What's Next",
+    "Constraints/Blockers"
+  ],
+  "lints": {
+    "V1": {"enabled": true, "target": "Session Directive"},
+    "V7": {"enabled": false},
+    "V8": {"enabled": true, "pattern": "<<[A-Z_]+>>"}
+  },
+  "rolloff": {
+    "strategy": "none",
+    "summarize_on_handoff": false
+  }
+}

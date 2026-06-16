@@ -1,0 +1,308 @@
+{
+  "schema_version": 3,
+  "method": "baton-threshold",
+  "model": "claude-sonnet-4-6",
+  "transcripts": [
+    {
+      "path": "/tmp/tmp.c2BSaDnqtE/projects/ws-A/sess-1.jsonl",
+      "workspace": "ws-A",
+      "session_id": "sess-1",
+      "best_threshold": 10,
+      "per_threshold": {
+        "10": 0.529500,
+        "12": 0.529500,
+        "14": 0.529500,
+        "16": 0.529500,
+        "18": 0.529500,
+        "20": 0.529500,
+        "22": 0.529500,
+        "24": 0.529500,
+        "26": 0.529500,
+        "28": 0.529500,
+        "30": 0.529500,
+        "32": 0.529500,
+        "34": 0.529500,
+        "36": 0.529500,
+        "38": 0.529500,
+        "40": 0.529500,
+        "42": 0.529500,
+        "44": 0.529500,
+        "46": 0.529500,
+        "48": 0.529500,
+        "50": 0.529500,
+        "never": 0.529500
+      }
+    },
+    {
+      "path": "/tmp/tmp.c2BSaDnqtE/projects/ws-B/sess-2.jsonl",
+      "workspace": "ws-B",
+      "session_id": "sess-2",
+      "best_threshold": 10,
+      "per_threshold": {
+        "10": 0.430800,
+        "12": 0.430800,
+        "14": 0.430800,
+        "16": 0.430800,
+        "18": 0.430800,
+        "20": 0.430800,
+        "22": 0.430800,
+        "24": 0.430800,
+        "26": 0.430800,
+        "28": 0.430800,
+        "30": 0.430800,
+        "32": 0.430800,
+        "34": 0.430800,
+        "36": 0.430800,
+        "38": 0.430800,
+        "40": 0.430800,
+        "42": 0.430800,
+        "44": 0.430800,
+        "46": 0.430800,
+        "48": 0.430800,
+        "50": 0.430800,
+        "never": 0.430800
+      }
+    }
+  ],
+  "aggregates": {
+    "10": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "12": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "14": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "16": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "18": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "20": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "22": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "24": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "26": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "28": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "30": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "32": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "34": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "36": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "38": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "40": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "42": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "44": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "46": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "48": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "50": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    },
+    "never": {
+      "median": 0.430800,
+      "mean": 0.480150,
+      "p95": 0.529500,
+      "iqr": 0.098700,
+      "count": 2
+    }
+  },
+  "typical_best": {
+    "median": 10.000000,
+    "mode": 10
+  },
+  "disclaimer": "Token counts are an estimate computed from content size and Anthropic's published per-model tokenizer behavior. Actual API billing uses Anthropic's authoritative count, which may differ by up to ~5% on prose and up to ~35% on code or structured text for Opus 4.7. For a billing-grade figure, use `bash tools/cost.sh --verify --corpus DIR`.",
+  "per_arm_per_subset": [
+    {
+      "arm": "compact",
+      "subset": "clean",
+      "usd_total": "0.534000",
+      "session_count": 2
+    },
+    {
+      "arm": "compact",
+      "subset": "fired",
+      "usd_total": "0.000000",
+      "session_count": 0
+    },
+    {
+      "arm": "auto-memory",
+      "subset": "clean",
+      "usd_total": "0.577500",
+      "session_count": 2
+    },
+    {
+      "arm": "auto-memory",
+      "subset": "fired",
+      "usd_total": "0.000000",
+      "session_count": 0
+    },
+    {
+      "arm": "clear-only",
+      "subset": "clean",
+      "usd_total": "0.534000",
+      "session_count": 2
+    },
+    {
+      "arm": "clear-only",
+      "subset": "fired",
+      "usd_total": "0.000000",
+      "session_count": 0
+    },
+    {
+      "arm": "none",
+      "subset": "clean",
+      "usd_total": "0.534000",
+      "session_count": 2
+    },
+    {
+      "arm": "none",
+      "subset": "fired",
+      "usd_total": "0.000000",
+      "session_count": 0
+    }
+  ],
+  "subset_size_warning": null,
+  "cc12_caveat": "This comparison adapts marginal-sensitivity-model methodology from observational epidemiology to the LLM-agent setting. No peer-reviewed paper has validated end-to-end DM-OPE-with-MSM-Gamma-bounds for cost evaluation under arm-induced trajectory drift in LLM agents specifically. The bounded estimator is the methodologically defensible answer; a single point estimate is not.",
+  "audit_metadata": {
+    "audit_date": "2026-05-24T00:00:00Z",
+    "cost_model_version": "1.0.0",
+    "tokenizer_id_per_model": {
+      "sonnet-4-6": "cl100k_base"
+    },
+    "model_activation_date_per_model": {
+      "sonnet-4-6": "2026-04-10"
+    },
+    "stage1_residual_per_arm": {
+      "none": null,
+      "auto-memory": null,
+      "clear-only": null,
+      "compact": null
+    },
+    "stage2_residual_per_arm": {
+      "none": null,
+      "auto-memory": null,
+      "clear-only": null,
+      "compact": null
+    },
+    "cache_break_detected": false,
+    "last_per_event_divergence": null,
+    "next_quarterly_audit_due": "2026-08-24T00:00:00Z",
+    "vendor_pricing_pages_checked_at": null
+  },
+  "gamma_bands": null,
+  "warn_count": 0
+}

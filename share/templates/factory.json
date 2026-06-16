@@ -1,0 +1,46 @@
+{
+  "template_id": "factory",
+  "template_version": 1,
+  "required_sections": [
+    "Session Directive",
+    "What's Next",
+    "Application Context",
+    "Position",
+    "L1 Context",
+    "L2 Context",
+    "Key Files",
+    "Task State",
+    "Constraints/Blockers",
+    "Git State"
+  ],
+  "optional_sections": [
+    "L1 Context",
+    "L2 Context"
+  ],
+  "lints": {
+    "V1": {"enabled": true, "target": "Session Directive"},
+    "V7": {
+      "enabled": true,
+      "sub_lints": {
+        "whats_next_file_ref": {"section": "What's Next", "pattern": "[A-Za-z0-9_/.-]+:[0-9]+", "min_matches": 1},
+        "position_branch_head": {"section": "Position", "required_patterns": ["^- Branch:", "^- HEAD:"]},
+        "task_state_json_entry_shape": {
+          "section": "Task State",
+          "json_block": true,
+          "tasks_done_entry_required": ["id", "description"],
+          "tasks_done_description_min_chars": 20,
+          "tasks_remaining_entry_required": ["id", "description"],
+          "tasks_remaining_description_min_chars": 20
+        }
+      }
+    },
+    "V8": {"enabled": true, "pattern": "<<[A-Z_]+>>"}
+  },
+  "rolloff": {
+    "strategy": "fresh-judgment",
+    "archive": true,
+    "archive_dir_template": ".baton/archive/{workstream}/{epoch}/",
+    "epoch_boundary_full_archive": true,
+    "epoch_summary_entry": true
+  }
+}

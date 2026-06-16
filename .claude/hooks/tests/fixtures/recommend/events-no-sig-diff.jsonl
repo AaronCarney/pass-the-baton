@@ -1,0 +1,4 @@
+{"event":"project_boundary","ts":"2026-03-01T00:00:00Z","data":{"kind":"start","session_id":"nsd-1","terminal_id":"t1","slug":"proj-nsd","workstream":"main"}}
+{"event":"project_boundary","ts":"2026-03-01T01:00:00Z","data":{"kind":"end","session_id":"nsd-1","terminal_id":"t1","slug":"proj-nsd","workstream":"main"}}
+{"event":"project_boundary","ts":"2026-03-02T00:00:00Z","data":{"kind":"start","session_id":"nsd-2","terminal_id":"t1","slug":"proj-nsd","workstream":"main"}}
+{"event":"project_boundary","ts":"2026-03-02T01:00:00Z","data":{"kind":"end","session_id":"nsd-2","terminal_id":"t1","slug":"proj-nsd","workstream":"main"}}

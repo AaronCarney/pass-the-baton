@@ -1,0 +1,12 @@
+{
+  "name": "pass-the-baton",
+  "owner": { "name": "Aaron Carney" },
+  "description": "Pass the Baton - session-continuity plugin for Claude Code.",
+  "plugins": [
+    {
+      "name": "pass-the-baton",
+      "source": "./",
+      "description": "Session-continuity hooks + skills for Claude Code."
+    }
+  ]
+}

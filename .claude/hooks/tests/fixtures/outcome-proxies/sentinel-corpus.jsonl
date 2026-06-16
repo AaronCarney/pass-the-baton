@@ -1,0 +1,2 @@
+{"hook":"code_execution","stdin":{"tool_name":"Bash","tool_input":{"command":"pytest SENTINEL_COMMAND_BODY_qrs789"},"tool_response":{"exit_code":0,"stdout":"SENTINEL_TEST_OUTPUT_abc456 1 passed"}}}
+{"hook":"retry_density","stdin":{"prompt":"SENTINEL_PROMPT_TOKEN_xyz123 please fix the failing test","session_id":"sess-priv-sentinel"}}

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "tool": "time-to-complete-corpus",
+  "filters": {
+    "method": null,
+    "status": null,
+    "workspace": null,
+    "subset": "both",
+    "date_from": null,
+    "date_to": null
+  },
+  "per_method": {
+    "compact": {
+      "n": 3,
+      "mean_seconds": 5100,
+      "median_seconds": 5400,
+      "p25_seconds": 3600,
+      "p75_seconds": 5400,
+      "projects": [
+        "proj-a",
+        "proj-b",
+        "proj-c"
+      ],
+      "by_subset": {
+        "fired": {
+          "n": 3,
+          "mean_seconds": 5100,
+          "median_seconds": 5400,
+          "p25_seconds": 3600,
+          "p75_seconds": 5400,
+          "projects": [
+            "proj-a",
+            "proj-b",
+            "proj-c"
+          ]
+        }
+      },
+      "ci": {
+        "point": 4966.063517486016,
+        "ci_lower": 2709.510415566537,
+        "ci_upper": 6252.394909193415,
+        "n_resamples": 10000,
+        "method": "studentized+log",
+        "alpha": 0.05
+      }
+    },
+    "none": {
+      "n": 3,
+      "mean_seconds": 7000,
+      "median_seconds": 7200,
+      "p25_seconds": 4800,
+      "p75_seconds": 7200,
+      "projects": [
+        "proj-d",
+        "proj-e",
+        "proj-f"
+      ],
+      "by_subset": {
+        "clean": {
+          "n": 3,
+          "mean_seconds": 7000,
+          "median_seconds": 7200,
+          "p25_seconds": 4800,
+          "p75_seconds": 7200,
+          "projects": [
+            "proj-d",
+            "proj-e",
+            "proj-f"
+          ]
+        }
+      },
+      "ci": {
+        "point": 6775.4594079434055,
+        "ci_lower": 4034.956462500438,
+        "ci_upper": 9011.978755483455,
+        "n_resamples": 10000,
+        "method": "studentized+log",
+        "alpha": 0.05
+      }
+    }
+  }
+}

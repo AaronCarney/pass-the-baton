@@ -1,0 +1,25 @@
+{
+  "schema_version": 3,
+  "method": "baton-threshold",
+  "model": "claude-sonnet-4-6",
+  "transcripts": [
+    {"path": "__REPO__/.claude/hooks/tests/fixtures/recommend/corpus-known-optimum/main/sess-1.jsonl", "workspace": "main", "session_id": "sess-1", "best_threshold": 22, "per_threshold": {"22": 0.10, "never": 0.20}},
+    {"path": "__REPO__/.claude/hooks/tests/fixtures/recommend/corpus-known-optimum/main/sess-2.jsonl", "workspace": "main", "session_id": "sess-2", "best_threshold": 22, "per_threshold": {"22": 0.10, "never": 0.20}},
+    {"path": "__REPO__/.claude/hooks/tests/fixtures/recommend/corpus-known-optimum/main/sess-3.jsonl", "workspace": "main", "session_id": "sess-3", "best_threshold": 22, "per_threshold": {"22": 0.10, "never": 0.20}},
+    {"path": "__REPO__/.claude/hooks/tests/fixtures/recommend/corpus-known-optimum/main/sess-4.jsonl", "workspace": "main", "session_id": "sess-4", "best_threshold": 22, "per_threshold": {"22": 0.10, "never": 0.20}},
+    {"path": "__REPO__/.claude/hooks/tests/fixtures/recommend/corpus-known-optimum/main/sess-5.jsonl", "workspace": "main", "session_id": "sess-5", "best_threshold": 22, "per_threshold": {"22": 0.10, "never": 0.20}},
+    {"path": "__REPO__/.claude/hooks/tests/fixtures/recommend/corpus-known-optimum/main/sess-6.jsonl", "workspace": "main", "session_id": "sess-6", "best_threshold": 22, "per_threshold": {"22": 0.10, "never": 0.20}}
+  ],
+  "aggregates": {
+    "22": {"median": 0.10, "mean": 0.10, "p95": 0.10, "iqr": 0.0, "count": 6},
+    "never": {"median": 0.20, "mean": 0.20, "p95": 0.20, "iqr": 0.0, "count": 6}
+  },
+  "per_arm_per_subset": [
+    {"arm": "compact",    "subset": "clean", "usd_total": "0.010", "session_count": 6},
+    {"arm": "clear_only", "subset": "clean", "usd_total": "0.050", "session_count": 6},
+    {"arm": "automemory", "subset": "clean", "usd_total": "0.040", "session_count": 6},
+    {"arm": "none",       "subset": "clean", "usd_total": "0.080", "session_count": 6}
+  ],
+  "typical_best": {"median": 22, "mode": 22},
+  "disclaimer": "fixture"
+}

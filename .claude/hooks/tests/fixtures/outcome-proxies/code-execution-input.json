@@ -1,0 +1,5 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {"command": "pytest tests/test_foo.py -v"},
+  "tool_response": {"exit_code": 0, "stdout": "3 passed", "stderr": ""}
+}
