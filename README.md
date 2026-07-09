@@ -6,6 +6,8 @@ A session ends - context fills up, the terminal closes, something crashes - and 
 
 **Pass the Baton hands that off for you.** As your context fills, it saves where you are. When you start again, that gets passed straight to the next session - so it picks up the work instead of starting cold.
 
+**The novelty isn't the refresh.** Saving and restoring a session is table stakes now. Two things set this apart. First, the handoff is a general substrate rather than a single feature: the same mechanism carries whatever you layer on top, so your own hooks, skills, and custom ecosystem ride along instead of being bolted on. Second, it is built for many terminals at once, including several open on the same project (even in the same root folder), kept safe from clobbering each other by a stack of deliberate edge-case protections.
+
 **▶ Watch the demo** - _(coming soon)_
 
 ![Baton Tests](https://github.com/AaronCarney/pass-the-baton/actions/workflows/baton-tests.yml/badge.svg)
