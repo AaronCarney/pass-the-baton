@@ -2,6 +2,28 @@
 # lib/tokens.sh - deterministic byte→token estimator with per-content-type ratios.
 # Source this file; do not execute directly.
 
+# CC6: source the shared _cfg::get resolver (env > config.json > default).
+# Self-contained: guard-source lib/config.sh; if unreachable, define a
+# FAITHFUL inline fallback so a dashboard config.json write is still honored
+# under plugin distribution. Precedent: .claude/hooks/lib/envelope.sh:26-48.
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.sh" 2>/dev/null || true
+fi
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  _cfg::get() {
+    local v; v="${!1:-}"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
+    local ck="${3:-$1}"
+    if [ -f "$cfg" ]; then
+      v="$(jq -r --arg k "$ck" '.[$k] // empty' "$cfg" 2>/dev/null || true)"
+      if [ -n "$v" ] && [ "$v" != 'null' ]; then printf '%s' "$v"; return 0; fi
+    fi
+    printf '%s' "${2:-}"
+  }
+fi
+
 # Default ratios (bytes per token)
 BYTES_PER_TOKEN_DEFAULT=3.2
 BYTES_PER_TOKEN_JSON=2.7
@@ -16,7 +38,7 @@ OPUS_4_7_MULT_CODE=1.20
 
 # tokens::load_ratios - source ratios override file if present. Idempotent.
 tokens::load_ratios() {
-  local ratios_file="${BATON_TOKEN_RATIOS:-$HOME/.config/baton/token-ratios.sh}"
+  local ratios_file; ratios_file="$(_cfg::get BATON_TOKEN_RATIOS "$HOME/.config/baton/token-ratios.sh")"
   if [ -f "$ratios_file" ]; then
     # shellcheck disable=SC1090
     source "$ratios_file"
@@ -50,7 +72,7 @@ _tokens::opus_mult() {
 tokens::estimate() {
   local bytes="$1"
   local ctype="$2"
-  local model="${3:-${BATON_COST_MODEL:-claude-sonnet-4-6}}"
+  local model="${3:-$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)}"
 
   local ratio
   ratio=$(_tokens::ratio_for "$ctype")
@@ -72,7 +94,7 @@ tokens::estimate() {
 tokens::estimate_file() {
   local path="$1"
   local ctype="$2"
-  local model="${3:-${BATON_COST_MODEL:-claude-sonnet-4-6}}"
+  local model="${3:-$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)}"
 
   if [ ! -r "$path" ]; then
     echo "tokens::estimate_file: cannot read '$path'" >&2

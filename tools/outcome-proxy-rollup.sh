@@ -17,8 +17,10 @@ source "$REPO_ROOT/lib/transcript.sh"
 source "$REPO_ROOT/lib/subset-stratify.sh"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/eventlog.sh"
+# shellcheck source=/dev/null
+source "$REPO_ROOT/lib/config.sh"   # CC6
 
-LOG="${BATON_EVENT_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl}"
+LOG="$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")"
 STATUS_FILE="$REPO_ROOT/.baton/retry-intent-status.json"
 PROJECTS_STATE="${BATON_PROJECTS_STATE:-$REPO_ROOT/.baton/projects.json}"
 TRANSCRIPTS_DIR="${BATON_CORPUS_DIR:-$HOME/.claude/projects}"

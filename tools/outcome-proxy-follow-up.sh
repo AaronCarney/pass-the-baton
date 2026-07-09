@@ -8,6 +8,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$REPO_ROOT/.claude/hooks/lib/outcome-proxies.sh"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/eventlog.sh"
+# shellcheck source=/dev/null
+source "$REPO_ROOT/lib/config.sh"   # CC6
 
 TRANSCRIPTS_DIR=""
 JSON_ONLY=0
@@ -32,7 +34,7 @@ if [ ! -d "$TRANSCRIPTS_DIR" ]; then
   echo "outcome-proxy-follow-up: transcripts directory not found ('$TRANSCRIPTS_DIR'); turn counts will be 0" >&2
 fi
 
-log_path="${BATON_EVENT_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl}"
+log_path="$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")"
 [ -f "$log_path" ] || exit 0
 
 # Group start events by slug → distinct terminal_ids + workstream.

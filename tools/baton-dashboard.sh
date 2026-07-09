@@ -36,8 +36,8 @@ _show() {
   printf '  %-32s %s\n' 'BATON_PROJECT_DIR:'   "$(_cfg::get BATON_PROJECT_DIR "$PWD")"
   printf '\n[TTLs]\n'
   printf '  %-32s %s\n' 'BATON_WORKSTREAM_TTL_DAYS:' "$(_cfg::get BATON_WORKSTREAM_TTL_DAYS 30)"
-  printf '  %-32s %s\n' 'BATON_TRACKING_TTL_DAYS:'   "$(_cfg::get BATON_TRACKING_TTL_DAYS 90)"
-  printf '  %-32s %s\n' 'BATON_TMP_TTL_HOURS:'       "$(_cfg::get BATON_TMP_TTL_HOURS 48)"
+  printf '  %-32s %s\n' 'BATON_TRACKING_TTL_DAYS:'   "$(_cfg::get BATON_TRACKING_TTL_DAYS 7)"
+  printf '  %-32s %s\n' 'BATON_TMP_TTL_HOURS:'       "$(_cfg::get BATON_TMP_TTL_HOURS 24)"
   printf '\n[Opt-ins]\n'
   printf '  %-32s %s\n' 'BATON_COLLECT:'            "$(_cfg::get BATON_COLLECT 0)"
   printf '  %-32s %s\n' 'BATON_TIMING:'             "$(_cfg::get BATON_TIMING 0)"
@@ -45,20 +45,24 @@ _show() {
   printf '  %-32s %s\n' 'BATON_PREWARM:'            "$(_cfg::get BATON_PREWARM 0)"
   printf '  %-32s %s\n' 'BATON_EVENT_LOG_DISABLE:'  "$(_cfg::get BATON_EVENT_LOG_DISABLE 0)"
   printf '\n[Event-log]\n'
-  printf '  %-32s %s\n' 'BATON_EVENT_LOG:'      "$(_cfg::get BATON_EVENT_LOG '')"
+  printf '  %-32s %s\n' 'BATON_EVENT_LOG:'      "$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")"
   printf '  %-32s %s\n' 'BATON_OTEL_EXPORT:'    "$(_cfg::get BATON_OTEL_EXPORT '')"
   printf '\n[Cost-model]\n'
   printf '  %-32s %s\n' 'BATON_COST_MODEL:'     "$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)"
-  printf '  %-32s %s\n' 'BATON_SUMMARY_MODEL:'  "$(_cfg::get BATON_SUMMARY_MODEL claude-sonnet-4-6)"
-  printf '  %-32s %s\n' 'BATON_TOKEN_RATIOS:'   "$(_cfg::get BATON_TOKEN_RATIOS '')"
+  printf '  %-32s %s\n' 'BATON_SUMMARY_MODEL:'  "$(_cfg::get BATON_SUMMARY_MODEL '')"
+  printf '  %-32s %s\n' 'BATON_TOKEN_RATIOS:'   "$(_cfg::get BATON_TOKEN_RATIOS "$HOME/.config/baton/token-ratios.sh")"
   printf '\n[Statusline]\n'
   printf '  %-32s %s\n' 'BATON_STATUSLINE_COLOR_MODE:' "$(_cfg::get BATON_STATUSLINE_COLOR_MODE off)"
   printf '\nActive template (%s):\n' "$template"
   printf '  %-32s %s\n' 'template_version:' "$tv"
-  printf '\nNote: template, templates_dir, project_context_file take effect from\n'
-  printf 'config.json at runtime. Other BATON_* keys are read from the\n'
-  printf 'environment by hooks (progressive config migration, CC6) - set the\n'
-  printf 'matching env var to change runtime behavior until that hook migrates.\n'
+  printf '\nNote: keys read through _cfg::get honor env var > config.json > default.\n'
+  printf 'The _cfg::get migration is partial -- some BATON_* vars are still read\n'
+  printf 'env-only by certain tools (e.g. query.sh/cost.sh/latency.sh read BATON_EVENT_LOG\n'
+  printf 'from the env), and BATON_DIR/BATON_PROJECT_DIR stay env-only by design.\n'
+  printf 'Export the env var when you need a value to take effect everywhere.\n'
+  printf 'threshold_pct moves the actual checkpoint trigger (env BATON_PCT_THRESHOLD or this\n'
+  printf 'config value; bounds 1-99, else the default 23), and the telemetry threshold field\n'
+  printf 'reports the same value.\n'
 }
 
 _set_one() {
@@ -127,20 +131,12 @@ EOF
       ;;
   esac
 
-  local tmp
-  tmp=$(mktemp -p "$CFG_DIR")
-  exec 9>"${CFG}.lock"
-  flock 9
+  # Single config write path (E-C): the atomic flock+jq write now lives in lib/config.sh
+  # so the dashboard and the threshold tuner cannot drift. threshold_pct is the one numeric key.
   case "$key" in
-    threshold_pct)
-      jq --argjson v "$value" '.threshold_pct = $v' "$CFG" > "$tmp" && mv "$tmp" "$CFG"
-      ;;
-    *)
-      jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$CFG" > "$tmp" && mv "$tmp" "$CFG"
-      ;;
+    threshold_pct) _cfg::set "$key" "$value" number ;;
+    *)             _cfg::set "$key" "$value" ;;
   esac
-  flock -u 9
-  exec 9>&-
 }
 
 case "${1:-}" in

@@ -6,7 +6,7 @@ Single source of truth for how Pass the Baton estimates and records Claude Code 
 
 ## Five primitives
 
-Cost is computed from five token-count fields emitted by the Claude Code API and five per-model pricing constants. All prices are USD per million tokens, verified against published Claude API pricing on 2026-05-14.
+Cost is computed from five token-count fields emitted by the Claude Code API and five per-model pricing constants. All prices are USD per million tokens, verified against published Claude API pricing on 2026-06-10.
 
 | Model | base_in | base_out | cache_write_5m | cache_write_1h | cache_read | min_cache_tokens |
 |---|---|---|---|---|---|---|
@@ -66,7 +66,7 @@ The CC6 disclaimer cites an outer bound of **~1.35× for code or structured text
 
 For non-Opus-4.7 models the multiplier is `1.0×`. After running calibration (see §Calibration), the multipliers are replaced by measured values.
 
-**Implementation home:** `lib/tokens.sh` - exports `tokens::estimate_from_bytes`, `tokens::load_ratios`, and `tokens::content_type_for_path`. The function `tokens::load_ratios` reads `~/.config/baton/token-ratios.sh` if present and overrides the defaults; otherwise the built-in table above applies.
+**Implementation home:** `lib/tokens.sh` - exports `tokens::estimate`, `tokens::estimate_file`, `tokens::load_ratios`, and `tokens::content_type_for_path`. The function `tokens::load_ratios` reads `~/.config/baton/token-ratios.sh` if present and overrides the defaults; otherwise the built-in table above applies.
 
 ---
 
@@ -137,7 +137,7 @@ The resolved dated ID is always used for pricing lookups. Callers should pass da
 **The `PRICING_VERIFIED_DATE` constant** is defined at the top of `lib/cost-models.sh`:
 
 ```bash
-PRICING_VERIFIED_DATE="2026-05-14"
+PRICING_VERIFIED_DATE="2026-06-10"
 ```
 
 It records the date on which the PRICE table constants were last verified against Anthropic's published pricing page.
@@ -216,6 +216,8 @@ The hook reads `model` (resolved via `cost_models::resolve_id`) and all five `us
     "fresh_input": 1234,
     "output": 456,
     "turn_index": 17,
+    "threshold": 23,
+    "summary_turn": false,
     "transcript_basename": "transcript.jsonl"
   }
 }
@@ -342,9 +344,10 @@ engine - it adds no new pricing constants.
   write over the tools+system+resume prefix; later turns read that prefix at
   `cache_read` (0.1× input) and only bill fresh user input.
 
-**Threshold sweep:** session cost is computed for thresholds `20 / 28 / 40 /
-never` (context-fill % of the flat-priced 1M window - no 200K
-branch). For each threshold the session **starts in the uncached regime** and
+**Threshold sweep:** session cost is computed for a dense grid of thresholds -
+`10, 12, 14, … 50` (every 2 percentage points) plus `never` (22 values total;
+see `tools/cost-sweep-corpus.sh`) - each a context-fill % of the flat-priced 1M
+window (no 200K branch). For each threshold the session **starts in the uncached regime** and
 stays there until cumulative fill first reaches `T`%; at that turn the `/clear`
 checkpoint fires and the session switches to the cached regime (re-clearing on
 each later crossing). A **higher** threshold runs uncached longer and
@@ -370,7 +373,17 @@ internally contradictory row this analysis already rejects.
 **Summary-generation cost (Addendum A).** The resume branch is not free: the
 prior session spends output tokens writing the progress summary that the next
 session reads. `--summary-tokens N` (env `BATON_SUMMARY_TOKENS`, default
-2500; `0` disables) sets `S`. `--summary-model ID` (env
+2500; `0` disables) sets `S`. When `S` is not set explicitly, it is
+auto-derived by `ccmp::derive_summary_tokens_default` through a
+three-tier precedence: (1) a **live running mean** of post-`/clear`
+summary-turn output
+tokens kept in `lib/summary-tokens-mean.sh` (state file
+`$XDG_STATE_HOME/baton/summary-tokens-mean.json`, shape `{n, mean,
+skill_hash}`), updated by `post-tool-batch.sh` on every detected summary turn
+and reset when the progress-file template selection changes; (2) a scan of
+recent progress files; (3) the flat 2500 fallback. This running mean is the one
+aggregate the telemetry layer maintains continuously on the hot path - every
+other rollup is computed on demand at query time. `--summary-model ID` (env
 `BATON_SUMMARY_MODEL`, default `--model`) prices the summary
 independently of the session model being compared - the writer may be a
 cheaper model than the session it serves. The CLI computes the per-`/clear`

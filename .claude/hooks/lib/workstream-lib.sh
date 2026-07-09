@@ -1,6 +1,33 @@
 #!/bin/bash
 # Shared workstream functions for checkpoint hooks.
 
+# CC6: source the shared _cfg::get resolver (env > config.json > default).
+# Self-contained: guard-source lib/config.sh; if unreachable, define a
+# FAITHFUL inline fallback so a dashboard config.json write is still honored
+# under plugin distribution. Precedent: .claude/hooks/lib/envelope.sh:26-48.
+# Guard on _cfg::path (a non-exported helper config.sh's _cfg::get depends on):
+# config.sh exports only _cfg::get, so a child process can inherit _cfg::get
+# WITHOUT _cfg::path. Re-sourcing when _cfg::path is absent restores the full
+# helper set; gating on _cfg::get alone would leave _cfg::get calling a missing
+# _cfg::path in subshells (cron sweep regression).
+if ! declare -F _cfg::path >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../lib/config.sh" 2>/dev/null || true
+fi
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  _cfg::get() {
+    local v; v="${!1:-}"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
+    local ck="${3:-$1}"
+    if [ -f "$cfg" ]; then
+      v="$(jq -r --arg k "$ck" '.[$k] // empty' "$cfg" 2>/dev/null || true)"
+      if [ -n "$v" ] && [ "$v" != 'null' ]; then printf '%s' "$v"; return 0; fi
+    fi
+    printf '%s' "${2:-}"
+  }
+fi
+
 # Append a structured JSONL event to the persistent hook audit log.
 # Keeps a forensic trail of selection outcomes, warnings, and sticky writes -
 # survives WSL shutdowns (unlike /tmp debug log). Gitignored.
@@ -71,11 +98,23 @@ term_hash_source() {
 # All readers honor the env var when set; otherwise fall back to a documented default.
 
 checkpoint_threshold() {
-  echo "${BATON_PCT_THRESHOLD:-23}"
+  # Single source of truth for the checkpoint trigger threshold (a context-fill
+  # percentage). env > config.json > default via _cfg::get, then bounds-clamped:
+  # an integer in 1..99 is honored; anything else falls back to the default.
+  # Both the gate (context-checkpoint.sh) and the PreToolUse telemetry field read
+  # through here, so the trigger and the reported `threshold` are always equal.
+  local _def=23 _t
+  _t="$(_cfg::get BATON_PCT_THRESHOLD "$_def" threshold_pct)"
+  if [[ "$_t" =~ ^[0-9]+$ ]] && [ "$_t" -ge 1 ] && [ "$_t" -le 99 ]; then
+    printf '%s' "$_t"
+  else
+    printf '%s' "$_def"
+  fi
 }
 
-# checkpoint_dir <project_dir> - root for tracking state.
-# Default: $project_dir/.baton (CC1).
+# checkpoint_dir <project_dir> - root for tracking state. Default: $project_dir/.baton (CC1).
+# NOTE (CC6): BATON_DIR stays ENV-ONLY by design - it locates the state dir (and thus the
+# forensic event log); it is deliberately not read from config.json.
 checkpoint_dir() {
   if [ -n "${BATON_DIR:-}" ]; then
     echo "$BATON_DIR"
@@ -87,31 +126,27 @@ checkpoint_dir() {
 # checkpoint_progress_dir <project_dir> - where progress files live.
 # Default: $(checkpoint_dir)/progress.
 checkpoint_progress_dir() {
-  if [ -n "${BATON_PROGRESS_DIR:-}" ]; then
-    echo "$BATON_PROGRESS_DIR"
-  else
-    echo "$(checkpoint_dir "$1")/progress"
-  fi
+  _cfg::get BATON_PROGRESS_DIR "$(checkpoint_dir "$1")/progress"
 }
 
 # archive_dir - XDG-aligned archive root, no project arg (archives are user-global).
 archive_dir() {
-  echo "${BATON_ARCHIVE_DIR:-$HOME/.local/share/baton}"
+  _cfg::get BATON_ARCHIVE_DIR "$HOME/.local/share/baton"
 }
 
 # TTL helpers - return seconds (or minutes for /tmp sweep).
 workstream_ttl_seconds() {
-  local d="${BATON_WORKSTREAM_TTL_DAYS:-30}"
+  local d; d="$(_cfg::get BATON_WORKSTREAM_TTL_DAYS 30)"
   echo $((d * 86400))
 }
 
 tracking_ttl_seconds() {
-  local d="${BATON_TRACKING_TTL_DAYS:-7}"
+  local d; d="$(_cfg::get BATON_TRACKING_TTL_DAYS 7)"
   echo $((d * 86400))
 }
 
 tmp_ttl_minutes() {
-  local h="${BATON_TMP_TTL_HOURS:-24}"
+  local h; h="$(_cfg::get BATON_TMP_TTL_HOURS 24)"
   echo $((h * 60))
 }
 
@@ -138,11 +173,12 @@ resolve_progress_file() {
     return 0
   fi
 
-  # Build list of dirs to search: BATON_PROGRESS_DIR if set, else $sessions_dir.
-  # No symlink-walk. OSS code has no knowledge of projects/ layout.
-  local search_dirs=()
-  if [ -n "${BATON_PROGRESS_DIR:-}" ]; then
-    search_dirs=("$BATON_PROGRESS_DIR")
+  # Build list of dirs to search: BATON_PROGRESS_DIR (env > config.json) if set,
+  # else $sessions_dir. No symlink-walk. OSS code has no knowledge of projects/.
+  local search_dirs=() progress_override
+  progress_override="$(_cfg::get BATON_PROGRESS_DIR '')"
+  if [ -n "$progress_override" ]; then
+    search_dirs=("$progress_override")
   else
     search_dirs=("$sessions_dir")
   fi
@@ -191,7 +227,7 @@ resolve_progress_file() {
 # Users who want dynamic display names set BATON_DISPLAY_NAME in their shell rc.
 derive_display_name() {
   local fallback="${3:-}"
-  echo "${BATON_DISPLAY_NAME:-$fallback}"
+  _cfg::get BATON_DISPLAY_NAME "$fallback" display_name
 }
 
 # parse_iso8601 <ts> - convert ISO 8601 to epoch seconds with safety semantics.

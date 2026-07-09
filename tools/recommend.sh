@@ -8,6 +8,9 @@ export LC_ALL=C
 # Capture repo root BEFORE any sourced lib can clobber _SD.
 _REC_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/config.sh"   # CC6
+
 # Source libs: recommend-aggregate.sh already sources release-dates + recommend-*.sh.
 # replay-harness.sh requires: stats-bootstrap, tokens, cost-models, cost-model-*.sh, transcript.sh
 # shellcheck source=/dev/null
@@ -53,7 +56,7 @@ source "$_REC_REPO/lib/time-to-complete.sh"
 MODE='human'
 CORPUS="${HOME}/.claude/projects"
 SINCE=''
-EVENTS="${BATON_EVENT_LOG:-${XDG_STATE_HOME:-${HOME}/.local/state}/baton/hook-events.jsonl}"
+EVENTS="$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-${HOME}/.local/state}/baton/hook-events.jsonl")"
 STRICT_RECENT='false'
 COST_JSON=''
 

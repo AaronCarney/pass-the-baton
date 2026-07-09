@@ -18,6 +18,12 @@ source "$_repo_root/lib/summary-tokens-mean.sh"
 # shellcheck disable=SC1091
 source "$_repo_root/lib/config.sh"
 
+# E-C: active threshold for self-describing cost data. workstream-lib is functions-only.
+if ! declare -F checkpoint_threshold >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$HOOKS_DIR/lib/workstream-lib.sh" 2>/dev/null || true
+fi
+
 # --- read stdin payload -------------------------------------------------------
 payload=$(cat)
 session_id=$(printf '%s' "$payload" | jq -r '.session_id // ""')
@@ -107,8 +113,9 @@ data_json=$(jq -cn \
   --argjson output "$output" \
   --argjson turn_index "$turn_index" \
   --argjson summary_turn "$summary_turn_bool" \
+  --argjson threshold "$(checkpoint_threshold)" \
   --arg transcript_basename "$transcript_basename" \
-  '{session_id:$session_id, model:$model, cache_read:$cache_read,
+  '{session_id:$session_id, model:$model, threshold:$threshold, cache_read:$cache_read,
     cache_write_5m:$cache_write_5m, cache_write_1h:$cache_write_1h,
     fresh_input:$fresh_input, output:$output,
     turn_index:$turn_index, summary_turn:$summary_turn,

@@ -3,6 +3,9 @@
 # Pure: no I/O, no jq. Depends only on lib/cost-models.sh (must be sourced first).
 # Oracle is cost_models::cost_of_turn (first-principles), NOT Brief 4 §4's stated $.
 
+# shellcheck source=/dev/null
+[[ $(type -t _cfg::get) == function ]] || source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.sh"   # CC6
+
 # _ccmp_sum_floats <f1> <f2> -> f1+f2  (LC_ALL=C: E8 locale precedent)
 _ccmp_add() { LC_ALL=C awk -v a="$1" -v b="$2" 'BEGIN{printf "%.6f", a+b}'; }
 _ccmp_lt()  { LC_ALL=C awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0<b+0)}'; }
@@ -45,8 +48,8 @@ ccmp::derive_summary_tokens_default() {
     fi
   fi
   # 2. Progress-file scan (verbatim from prior behavior).
-  local prog_dir="${BATON_PROGRESS_DIR:-${BATON_DIR:-$PWD/.baton}/progress}"
-  local archive_dir="${BATON_ARCHIVE_DIR:-$HOME/.local/share/baton}"
+  local prog_dir; prog_dir="$(_cfg::get BATON_PROGRESS_DIR "${BATON_DIR:-$PWD/.baton}/progress")"
+  local archive_dir; archive_dir="$(_cfg::get BATON_ARCHIVE_DIR "$HOME/.local/share/baton")"
   local total=0 count=0 f tok
   if [ -d "$prog_dir" ]; then
     while IFS= read -r f; do

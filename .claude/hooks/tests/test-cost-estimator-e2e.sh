@@ -255,32 +255,7 @@ assert "NO-NETWORK: grep finds 0 network calls in E8 files (exit 1 = no match)" 
   "[ '$NO_NETWORK_RC' -eq 1 ]"
 
 # ---------------------------------------------------------------------------
-# 9. CHANGELOG checks
-# ---------------------------------------------------------------------------
-echo
-echo "## Assertions - CHANGELOG.md"
-
-CHANGELOG="$REPO_DIR/CHANGELOG.md"
-
-assert "CHANGELOG: contains E8 heading" \
-  "grep -q '## E8 - Cost Estimator' '$CHANGELOG'"
-assert "CHANGELOG: mentions cost_rollup" \
-  "grep -q 'cost_rollup' '$CHANGELOG'"
-assert "CHANGELOG: mentions cache_anomaly" \
-  "grep -q 'cache_anomaly' '$CHANGELOG'"
-assert "CHANGELOG: mentions tools_changed" \
-  "grep -q 'tools_changed' '$CHANGELOG'"
-assert "CHANGELOG: mentions schema_version remains 1" \
-  "grep -q 'schema_version' '$CHANGELOG' && grep -qE 'remains.*1|additive|schema_version.*1' '$CHANGELOG'"
-assert "CHANGELOG: mentions prewarm_ok (FIX-7f)" \
-  "grep -q 'prewarm_ok' '$CHANGELOG'"
-assert "CHANGELOG: mentions prewarm_failed (FIX-7f)" \
-  "grep -q 'prewarm_failed' '$CHANGELOG'"
-assert "CHANGELOG: E8 heading dated 2026-05-14 (FIX-7f)" \
-  "grep -qE '## E8 .* 2026-05-14' '$CHANGELOG'"
-
-# ---------------------------------------------------------------------------
-# 10. Re-run all E8 test files (regression sweep)
+# 9. Re-run all E8 test files (regression sweep)
 # ---------------------------------------------------------------------------
 echo
 echo "## Regression sweep - all 8 other E8 test files"

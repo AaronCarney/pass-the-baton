@@ -6,6 +6,7 @@ Start at the [project README](../README.md) for the elevator pitch + quick insta
 
 - [**install.md**](install.md) - full setup, dependency table (core + analysis tools), platform support, uninstall.
 - [**context-baton.md**](context-baton.md) - design rationale, state schema, env-var reference, troubleshooting (jq recipes for state files + event log).
+- [**repair-event-log.md**](repair-event-log.md) - backup-first repair when the event log corrupts (NUL/blank lines).
 
 ## I want to use the CLI tools
 
@@ -23,6 +24,7 @@ Flag-by-flag reference for `cost.sh`, `doctor.sh`, `baton-dashboard.sh`, and `pr
 
 ## I want to configure something
 
+- [**configuration.md**](configuration.md) - start here: every config-file surface + the env > config.json > default resolution order.
 - **Trigger threshold (`BATON_PCT_THRESHOLD`)** + the four common opt-in env vars: see [project README § Configuration](../README.md#configuration).
 - **Full env-var table** (paths, TTLs, archive dirs): [context-baton.md § Configuration](context-baton.md#configuration-env-vars).
 - **Per-project role mapping** (`project-context.json`): [project-context.md](project-context.md).
@@ -37,6 +39,7 @@ Flag-by-flag reference for `cost.sh`, `doctor.sh`, `baton-dashboard.sh`, and `pr
 ## I'm contributing code or want to understand mechanism
 
 - **Mechanism overview** - the hook → event → state-write flow + SessionStart routing precedence: [project README § How It Works](../README.md#how-it-works).
+- [**architecture.md**](architecture.md) - end-to-end data flow: hooks -> libs -> state -> tools.
 - **Repository layout** - full per-file annotated tree: [repo-layout.md](repo-layout.md).
 - **Design rationale, state schema, troubleshooting:** [context-baton.md](context-baton.md).
 - **Contributing** (scope, style, the test-as-contract rule): [CONTRIBUTING.md](../CONTRIBUTING.md).

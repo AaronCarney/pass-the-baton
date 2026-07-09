@@ -41,10 +41,15 @@ echo "## resume.sh - list + rebind"
 run_lists_archived() {
   local proj; proj=$(mkr); link_lib "$proj"
   local archive; archive=$(mktemp -d)
-  mkdir -p "$archive/checkpoint-state/2026-05/workstreams"
-  jq -n --arg pd "$proj" \
-    '{workstream:"old-ws", display_name:"OldWS", project_dir:$pd, updated_at:"2026-05-09T00:00:00Z", phase:"impl"}' \
-    > "$archive/checkpoint-state/2026-05/workstreams/old-ws.json"
+  # Recent (within list_archived's 30-day cutoff) so the fixture never expires; the
+  # archive month-dir is glob-matched, only updated_at gates inclusion.
+  local recent_iso recent_month
+  recent_iso=$(date -u -d '-5 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-5d +%Y-%m-%dT%H:%M:%SZ)
+  recent_month=$(date -u +%Y-%m)
+  mkdir -p "$archive/checkpoint-state/$recent_month/workstreams"
+  jq -n --arg pd "$proj" --arg ts "$recent_iso" \
+    '{workstream:"old-ws", display_name:"OldWS", project_dir:$pd, updated_at:$ts, phase:"impl"}' \
+    > "$archive/checkpoint-state/$recent_month/workstreams/old-ws.json"
   local out
   out=$(BATON_PROJECT_DIR="$proj" BATON_DIR="$proj/.baton" \
     BATON_ARCHIVE_DIR="$archive" \

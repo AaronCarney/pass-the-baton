@@ -14,9 +14,31 @@
 # latency.sh report the instrumentation tax the user is paying.
 set -u
 
+# CC6: source the shared _cfg::get resolver (env > config.json > default).
+# Self-contained: guard-source lib/config.sh; if unreachable, define a
+# FAITHFUL inline fallback so a dashboard config.json write is still honored
+# under plugin distribution. Precedent: .claude/hooks/lib/envelope.sh:26-48.
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lib/config.sh" 2>/dev/null || true
+fi
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  _cfg::get() {
+    local v; v="${!1:-}"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
+    local ck="${3:-$1}"
+    if [ -f "$cfg" ]; then
+      v="$(jq -r --arg k "$ck" '.[$k] // empty' "$cfg" 2>/dev/null || true)"
+      if [ -n "$v" ] && [ "$v" != 'null' ]; then printf '%s' "$v"; return 0; fi
+    fi
+    printf '%s' "${2:-}"
+  }
+fi
+
 # Fast off-path: drain stdin to avoid SIGPIPE on the SDK side, then exit.
 # Sub-ms cost vs the ~15-30ms on-path so the off-default is genuinely cheap.
-if [ "${BATON_TIMING:-0}" != "1" ]; then
+if [ "$(_cfg::get BATON_TIMING 0)" != "1" ]; then
   cat > /dev/null
   exit 0
 fi

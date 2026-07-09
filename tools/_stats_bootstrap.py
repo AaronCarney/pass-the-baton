@@ -77,6 +77,12 @@ def studentized(x: np.ndarray, n: int, alpha: float, rng: np.random.Generator) -
         if s > 0:
             t_boots.append((m - point) / s)
     t_arr = np.asarray(t_boots)
+    # Degenerate guard (symmetric with bca): a size-1 or zero-variance stratum makes
+    # se non-finite and leaves t_arr empty, so np.quantile has nothing to reduce
+    # (raises IndexError on numpy>=2). Fall back to the point CI.
+    if t_arr.size == 0 or not np.isfinite(se):
+        return {'point': point, 'ci_lower': point, 'ci_upper': point,
+                'n_resamples': n, 'method': 'studentized', 'alpha': alpha, 'degenerate': True}
     t_lo, t_hi = np.quantile(t_arr, [alpha / 2, 1 - alpha / 2])
     return {'point': point, 'ci_lower': float(point - t_hi * se), 'ci_upper': float(point - t_lo * se), 'n_resamples': n, 'method': 'studentized', 'alpha': alpha}
 

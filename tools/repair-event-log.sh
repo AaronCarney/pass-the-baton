@@ -20,6 +20,8 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 # shellcheck disable=SC1090
 source "$REPO_ROOT/lib/eventlog.sh"
+# shellcheck source=/dev/null
+source "$REPO_ROOT/lib/config.sh"   # CC6
 
 die(){ echo "repair-event-log: $1" >&2; exit 1; }
 
@@ -38,7 +40,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$LOG" ]; then
-  LOG="${BATON_EVENT_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl}"
+  LOG="$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")"
 fi
 
 [ -e "$LOG" ] || die "log not found: $LOG"

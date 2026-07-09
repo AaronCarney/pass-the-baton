@@ -3,7 +3,7 @@
 # Pure bash; sourced; no I/O; no network.
 
 # Freshness anchor - T6 doctor reads this to warn when stale.
-PRICING_VERIFIED_DATE="2026-06-10"
+PRICING_VERIFIED_DATE="2026-06-21"
 
 # Geo + fast multipliers (off by default - applied by cost_models::cost_of_turn).
 INFERENCE_GEO_US_MULTIPLIER=1.10
@@ -50,6 +50,12 @@ declare -A _CM_PRICE=(
   ["claude-haiku-4-5:cache_write_5m"]=1.25
   ["claude-haiku-4-5:cache_write_1h"]=2.00
   ["claude-haiku-4-5:cache_read"]=0.10
+
+  ["claude-fable-5:base_in"]=10.00
+  ["claude-fable-5:base_out"]=50.00
+  ["claude-fable-5:cache_write_5m"]=12.50
+  ["claude-fable-5:cache_write_1h"]=20.00
+  ["claude-fable-5:cache_read"]=1.00
 )
 
 # min_cache_tokens per model
@@ -60,6 +66,7 @@ declare -A _CM_MIN_CACHE=(
   ["claude-sonnet-4-6"]=2048
   ["claude-sonnet-4-5"]=1024
   ["claude-haiku-4-5"]=4096
+  ["claude-fable-5"]=2048
 )
 
 # Pinned dated IDs - bump manually on intentional release.
@@ -70,6 +77,7 @@ declare -A _CM_PINNED=(
   ["claude-sonnet-4-6"]="claude-sonnet-4-6-20260101"
   ["claude-sonnet-4-5"]="claude-sonnet-4-5-20260101"
   ["claude-haiku-4-5"]="claude-haiku-4-5-20260101"
+  ["claude-fable-5"]="claude-fable-5-20260101"
   # Pinned IDs also map to themselves (no warning).
   ["claude-opus-4-8-20260101"]="claude-opus-4-8-20260101"
   ["claude-opus-4-7-20260101"]="claude-opus-4-7-20260101"
@@ -77,6 +85,7 @@ declare -A _CM_PINNED=(
   ["claude-sonnet-4-6-20260101"]="claude-sonnet-4-6-20260101"
   ["claude-sonnet-4-5-20260101"]="claude-sonnet-4-5-20260101"
   ["claude-haiku-4-5-20260101"]="claude-haiku-4-5-20260101"
+  ["claude-fable-5-20260101"]="claude-fable-5-20260101"
 )
 
 # Canonical model alias list (stable order)
@@ -87,6 +96,7 @@ _CM_MODELS=(
   claude-sonnet-4-6
   claude-sonnet-4-5
   claude-haiku-4-5
+  claude-fable-5
 )
 
 # Opus models that support --fast

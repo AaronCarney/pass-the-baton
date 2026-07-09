@@ -9,7 +9,11 @@ workstream a given session belongs to.
 1. The **statusline** writes the current context % to
    `/tmp/claude-context-pct-${SESSION_ID}` on every refresh.
 2. The **PreToolUse hook** (`context-checkpoint.sh`) reads that value on every
-   tool call. At 23%:
+   tool call. At the configured threshold (default 23; resolved env >
+   `config.json` > default and bounds-checked to 1-99 by
+   `workstream-lib.sh::checkpoint_threshold`, which both the gate at
+   `context-checkpoint.sh:66,158` and the telemetry `threshold` field read -
+   so trigger and reported value never diverge - see the env-var note below):
    - Lists this terminal's progress files for archival (matched by `term_hash`)
      into `/tmp/baton-archive-${SESSION_ID}`.
    - Sets `/tmp/baton-pending-${SESSION_ID}`.
@@ -114,8 +118,10 @@ does this terminal belong to."
 }
 ```
 
-`term_hash` is computed by `lib/workstream-lib.sh::term_hash` from
-`USER:CLAUDE_TERMINAL_ID` (falls back to `tty` or the parent shell's tty).
+The `terminal_id` field stores the *source* string (`CLAUDE_TERMINAL_ID`, or
+the tty / parent-shell tty fallback). The filename `terminals/<term_hash>.json`
+is the **md5 hash** of `USER:<source>`, computed by
+`lib/workstream-lib.sh::term_hash`.
 
 ## Three Execution Modes
 
@@ -189,13 +195,65 @@ checkpoint or a `/resume`.
 | `BATON_PROGRESS_DIR` | `$BATON_DIR/progress` | Where progress markdown files are written. |
 | `BATON_ARCHIVE_DIR` | `$HOME/.local/share/baton` | Where archived (>7d-idle) workstreams move. |
 | `BATON_PROJECT_DIR` | `$PWD` at install time | Project root for cron (cron has no `$PWD`). |
-| `BATON_PCT_THRESHOLD` | `23` | % context fill that fires the checkpoint trigger. |
+| `BATON_PCT_THRESHOLD` | `23` | Percent context-fill trigger. Resolved **env var > `config.json` `threshold_pct` > default 23** by `workstream-lib.sh::checkpoint_threshold`, then bounds-checked: an integer in **1-99** is honored, anything else falls back to 23. Both the gate (`context-checkpoint.sh:66,158`) and the telemetry `threshold` field read through that one function, so changing this var (or `threshold_pct` in config) moves the actual trigger. |
 | `BATON_WORKSTREAM_TTL_DAYS` | `30` | Days before a workstream record is archived. |
 | `BATON_TRACKING_TTL_DAYS` | `7` | Days before a per-session tracking pointer is reaped. |
+| `BATON_TMP_TTL_HOURS` | `24` | Age before `/tmp` stragglers are swept by the cleanup cron. |
+| `BATON_SWEEP_INTERVAL_HOURS` | `48` | Self-throttle interval for the cleanup sweep (the `--if-due` gate in `cleanup-cron.sh`). **Does not set cron frequency** - `install-cron.sh` prints a fixed `0 0 */2 * *` crontab line (every two days); this var only gates whether an invoked sweep actually runs. |
+| `BATON_CRON_LOG` | `$HOME/.cache/baton/cron.log` | Where the cleanup cron writes its log. |
 | `BATON_DISPLAY_NAME` | (auto-generated) | Optional human-readable label for this terminal's workstream. Read at `claude` launch time. |
 | `WORKSTREAM` | (unset) | Explicit binding. Corrupt referenced JSON exits 1; missing fresh-creates. |
 | `BATON_COLLECT` | `0` | Global override that opens event-log collection with no arc. Env var, or the verbatim `BATON_COLLECT` key in `config.json` (set via the `/baton` dashboard). |
 | `BATON_EVENT_LOG_DISABLE` | `0` | Hard kill-switch - suppresses all `envelope::emit` output, overriding even an open arc. |
+| `BATON_TUNE_SETPOINT` | `0` | Adaptive-tuner target score (score-space, may be fractional). Placeholder default - owner sets the real value from data. Resolved env > `config.json` `tune_setpoint` > default. |
+| `BATON_TUNE_DEADBAND` | `1` | Tolerance band around the setpoint; the tuner holds while \|score − setpoint\| ≤ deadband. Placeholder. `tune_deadband`. |
+| `BATON_TUNE_STEP` | `2` | Threshold step size in percentage points per applied adjustment. Placeholder. `tune_step`. |
+| `BATON_TUNE_SAFETY_MIN` | `10` | Lower bound the tuner will never set the threshold below. Placeholder. `tune_safety_min`. |
+| `BATON_TUNE_SAFETY_MAX` | `50` | Upper bound the tuner will never set the threshold above. Placeholder. `tune_safety_max`. |
+| `BATON_TUNE_DWELL_SECONDS` | `86400` | Minimum seconds between applied adjustments (rate-limit). Placeholder. `tune_dwell_seconds`. |
+| `BATON_TUNE_SCORE_FN` | `score_hold` | Name of the scoring function the tuner uses. The default `score_hold` is a guaranteed no-op (returns the setpoint, so every cycle decides HOLD). `tune_score_fn`. |
+
+**config.json wiring (CC6, partial).** The `/baton` dashboard persists every
+variable above to `config.json`. Consumers that read through `_cfg::get`
+(`lib/config.sh`) honor it, with **env var > `config.json` > default**
+precedence; legacy keys whose env name differs from their JSON key (e.g.
+`BATON_PCT_THRESHOLD` ↔ `threshold_pct`) pass the JSON key as `_cfg::get`'s third
+argument. But the CC6 migration to `_cfg::get` is **per-consumer and still in
+progress**: many `BATON_*` variables are read through `_cfg::get` in some code
+paths yet straight from the environment in others. `BATON_EVENT_LOG`, for
+instance, routes through `_cfg::get` in `envelope.sh` and `export.sh` but is read
+env-only by the analysis CLIs (`query.sh`, `cost.sh`, `latency.sh`) - so a
+dashboard `set` of a not-yet-fully-migrated key writes the file but has no
+runtime effect on the consumers still reading the env var. `BATON_DIR` and
+`BATON_PROJECT_DIR` stay env-only by design (they locate the state dir / install
+root before config can be read). When you need a value to take effect
+everywhere, export the env var - it always wins.
+
+## Adaptive threshold tuner (built, not yet connected)
+
+The checkpoint threshold has a closed-loop feedback controller
+(`lib/threshold-controller.sh`, E-C). One control cycle measures a score,
+compares it to the setpoint, and - if outside the deadband - steps the threshold
+by one `BATON_TUNE_STEP` within the `[BATON_TUNE_SAFETY_MIN, BATON_TUNE_SAFETY_MAX]`
+band, rate-limited by `BATON_TUNE_DWELL_SECONDS`, persisting via the same
+`_cfg::set threshold_pct` write the dashboard uses. An exported
+`BATON_PCT_THRESHOLD` hard-pins the threshold and suppresses the tuner.
+
+It auto-runs once per **main** session from `session-start.sh` (the subagent
+path exits before this block), and only while event collection is on (an open
+arc or `BATON_COLLECT=1`) - never silently in an ordinary session.
+
+**It does not optimize anything yet, by design.** The scoring function is a
+swappable registry entry, and the shipped default `score_fn=score_hold` returns
+the setpoint, so `decide` always chooses HOLD and `apply` never writes - every
+auto-tick is a guaranteed no-op. More importantly, no scoring function is wired
+to the measurement signals the system already produces (the summary-tokens
+running mean, `cost_rollup` events, the outcome proxies, or `tools/recommend.sh`).
+Until a real `score_*` reads one of those signals and the owner sets real knob
+values, the controller is a complete *mechanism* with no *feedback*. The
+`tuner_snapshot` and `threshold_applied` events it emits (see
+[telemetry](telemetry.md)) record its knob vector and any apply, but nothing
+consumes them today.
 
 Legacy `OLORIN_*` vars (`OLORIN_PROJECT_DIR`, `OLORIN_ARCHIVE_DIR`) are accepted as fallbacks for one release cycle with a deprecation warning. See [`docs/install.md`](install.md) for first-time setup.
 
@@ -205,11 +263,20 @@ Pruned workstreams move to:
 
 ```
 $BATON_ARCHIVE_DIR/
+├── progress/
+│   └── YYYY-MM/
+│       └── progress-<basename>.md        # checkpoint-write-trigger.sh
 └── checkpoint-state/
     └── YYYY-MM/
-        ├── workstreams/<ws>.json
-        └── progress/progress-<basename>.md
+        ├── workstreams/<ws>.json         # workstream-lib.sh::archive_workstream
+        └── sessions-tracking/<sid>.json  # workstream-lib.sh::archive_session_tracking
 ```
+
+Note the two roots: **progress** markdown archives under
+`$BATON_ARCHIVE_DIR/progress/YYYY-MM/` (written directly by the post-write
+trigger), while **workstream** records and **per-session tracking** files
+archive under `$BATON_ARCHIVE_DIR/checkpoint-state/YYYY-MM/{workstreams,sessions-tracking}/`
+(written by the rolloff helpers).
 
 `/resume --list` shows the last 30 days from this tree. Restoring an archived workstream copies the record back to `$BATON_DIR/workstreams/` and the progress file back to `$BATON_PROGRESS_DIR/`.
 
@@ -218,9 +285,9 @@ $BATON_ARCHIVE_DIR/
 | File                                              | Tracked | Purpose                                                              |
 |---------------------------------------------------|---------|----------------------------------------------------------------------|
 | `~/.claude/statusline.sh`                          | No (global) | Writes context % to `/tmp/claude-context-pct-${SESSION_ID}`.       |
-| `.claude/hooks/context-checkpoint.sh`              | Yes | PreToolUse - 23% trigger, save-workflow injection, post-DONE block.    |
+| `.claude/hooks/context-checkpoint.sh`              | Yes | PreToolUse - configured-threshold trigger (default 23%), save-workflow injection, post-DONE block.    |
 | `.claude/hooks/checkpoint-write-trigger.sh`        | Yes | PostToolUse (`Write|Edit|MultiEdit`) - atomic cleanup on progress write. |
-| `.claude/hooks/session-start.sh`                   | Yes | SessionStart - workstream binding + progress directive injection.      |
+| `.claude/hooks/session-start.sh`                   | Yes | SessionStart - workstream binding + progress directive injection; runs one adaptive-tuner cycle + emits tuner_snapshot when collection is on (main session only).      |
 | `.claude/hooks/project-detect.sh`                  | Yes | UserPromptSubmit - project-name + rename-prompt → `display_name`.      |
 | `.claude/hooks/cleanup-on-exit.sh`                 | Yes | SessionEnd - archive per-session tracking, wipe `/tmp` for known SIDs. |
 | `.claude/hooks/post-tool-batch.sh`                 | Yes | PostToolBatch - `cost_rollup` from the main session's last `usage`.    |

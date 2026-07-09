@@ -4,6 +4,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 TMP_STATE="$(mktemp -d)"
 export XDG_STATE_HOME="$TMP_STATE"
+export XDG_CONFIG_HOME="$TMP_STATE/config"; mkdir -p "$XDG_CONFIG_HOME/baton"
+echo '{"threshold_pct":29}' > "$XDG_CONFIG_HOME/baton/config.json"
 export BATON_EVENT_LOG="$TMP_STATE/hook-events.jsonl"
 # E23 off-by-default: open the collection gate so emit-and-assert paths collect.
 export BATON_COLLECT=1
@@ -32,6 +34,7 @@ outcome_proxies::emit_event code_execution '{"success":true,"runner":"pytest","e
 assert 'consent on → log has 1 line' "[ $(wc -l < "$BATON_EVENT_LOG") -eq 1 ]"
 assert 'event=outcome_proxy' "jq -e '.event == \"outcome_proxy\"' \"$BATON_EVENT_LOG\" >/dev/null"
 assert 'data.subkind=code_execution' "jq -e '.data.subkind == \"code_execution\"' \"$BATON_EVENT_LOG\" >/dev/null"
+assert 'data.threshold stamped (29)' "jq -e '.data.threshold == 29' \"$BATON_EVENT_LOG\" >/dev/null"
 assert 'data.success=true' "jq -e '.data.success == true' \"$BATON_EVENT_LOG\" >/dev/null"
 assert 'data.runner=pytest' "jq -e '.data.runner == \"pytest\"' \"$BATON_EVENT_LOG\" >/dev/null"
 unset BATON_OUTCOME_PROXIES

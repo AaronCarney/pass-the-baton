@@ -33,7 +33,7 @@ fi
 # write is still honored. Mirrors lib/config.sh::_cfg::get exactly (key, default, cfg_key).
 if ! declare -F _cfg::get >/dev/null 2>&1; then
   _cfg::get() {
-    local v; v="$(printenv "$1" 2>/dev/null || true)"
+    local v; v="${!1:-}"
     if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
     local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
     local ck="${3:-$1}"
@@ -46,11 +46,7 @@ if ! declare -F _cfg::get >/dev/null 2>&1; then
 fi
 
 envelope::_log_path() {
-  if [ -n "${BATON_EVENT_LOG:-}" ]; then
-    printf '%s' "$BATON_EVENT_LOG"
-  else
-    printf '%s' "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl"
-  fi
+  _cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl"
 }
 
 envelope::_redact() {
@@ -116,8 +112,8 @@ envelope::_active_arc() {
 }
 
 envelope::emit() {
-  # Hard kill-switch - highest precedence (unchanged).
-  [ "${BATON_EVENT_LOG_DISABLE:-0}" = "1" ] && return 0
+  # Hard kill-switch - highest precedence (config.json or env).
+  [ "$(_cfg::get BATON_EVENT_LOG_DISABLE 0)" = "1" ] && return 0
 
   # E23/CC19 off-by-default gate: collect only when an arc is open OR the global
   # collect flag is enabled. Resolve the arc ONCE here and reuse it for the stamp below.

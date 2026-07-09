@@ -184,7 +184,10 @@ bash "$REPO_ROOT/tools/outcome-proxy-commit-survival.sh" --repo "$TMP_GIT" --slu
 CS_EVT_FILE="$TMP_STATE/cs-evt.json"
 grep '"subkind":"commit_survival"' "$BATON_EVENT_LOG" | tail -1 > "$CS_EVT_FILE"
 assert 'commit-survival event emitted' "[ -s \"$CS_EVT_FILE\" ]"
-assert 'commit-survival event carries slug field' "jq -e '.data.slug == \"slug-cs-y\"' \"$CS_EVT_FILE\" >/dev/null"
+# E-D privacy fix: the emitted commit_survival outcome_proxy payload is numeric-only
+# (L0 D1) - slug is stripped before emit (kept only on the --json standalone path).
+# Enforced by test-outcome-proxy-privacy.sh; this consumer mirrors that contract.
+assert 'commit-survival event does NOT carry slug field (privacy, E-D)' "jq -e '.data | has(\"slug\") | not' \"$CS_EVT_FILE\" >/dev/null"
 
 # Backward-compat sibling-field presence (closeout iter-2): adding `slug` MUST NOT remove pre-existing fields.
 # Values are tool-computed from the fixture (only 1 seeded session/commit), so this asserts presence + non-null only.

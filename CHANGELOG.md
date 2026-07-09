@@ -6,7 +6,8 @@ All notable changes to Pass the Baton are documented here. The format is based o
 
 ## [Unreleased]
 
-_No changes since the most recent pre-release entry below._
+- Adaptive threshold tuner now runs automatically: each session start runs one controller cycle, gated on event collection being on (open arc or `BATON_COLLECT=1`); a no-op under the placeholder `score_hold` until a real scoring function is configured.
+- `tuner_snapshot` telemetry event: each main session records the resolved threshold-tuner knob vector (setpoint, deadband, step, safety bounds, dwell, scoring fn) plus the effective threshold and `session_id`, gated on event collection. Lets a knob setting be joined to its session's `cost_rollup` from the logs alone.
 
 ---
 

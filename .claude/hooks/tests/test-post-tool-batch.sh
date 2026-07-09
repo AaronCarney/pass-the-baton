@@ -49,10 +49,12 @@ run_cost_rollup_emit() {
   local state_dir="$d/state/baton"
   mkdir -p "$state_dir"
   make_transcript "$transcript"
+  mkdir -p "$d/config/baton"; echo '{"threshold_pct":37}' > "$d/config/baton/config.json"
   local payload; payload=$(make_payload "sess-001" "$transcript")
   printf '%s' "$payload" | \
     BATON_EVENT_LOG="$log" \
     XDG_STATE_HOME="$d/state" \
+    XDG_CONFIG_HOME="$d/config" \
     BATON_COLLECT=1 \
     bash "$HOOK"
   assert "EMIT: log file exists after emit" "[ -f '$log' ]"
@@ -68,6 +70,7 @@ run_cost_rollup_emit() {
   assert "EMIT: data.transcript_basename from path" "echo '$line' | jq -e '.data.transcript_basename==\"transcript.jsonl\"' >/dev/null 2>&1"
   assert "EMIT: data.turn_index = assistant-message count (1)" "echo '$line' | jq -e '.data.turn_index==1' >/dev/null 2>&1"
   assert "EMIT: data.model from transcript" "echo '$line' | jq -e '.data.model==\"claude-sonnet-4-6\"' >/dev/null 2>&1"
+  assert "EMIT: data.threshold = active checkpoint threshold (37)" "echo '$line' | jq -e '.data.threshold==37' >/dev/null 2>&1"
   assert "EMIT: log file mode 0600" "[ \"\$(stat -c %a '$log')\" = '600' ]"
   rm -rf "$d"
 }

@@ -18,6 +18,9 @@
 # No network. Read-only.
 set -u
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/config.sh"   # CC6
+
 USER_SQL="${1:-}"
 
 if ! command -v duckdb >/dev/null 2>&1; then
@@ -29,7 +32,7 @@ default_event_log() {
   local base="${XDG_STATE_HOME:-$HOME/.local/state}/baton"
   echo "$base/hook-events.jsonl"
 }
-LIVE_LOG="${BATON_EVENT_LOG:-$(default_event_log)}"
+LIVE_LOG="$(_cfg::get BATON_EVENT_LOG "$(default_event_log)")"
 
 INPUTS=()
 [ -e "$LIVE_LOG" ] && INPUTS+=("$LIVE_LOG")

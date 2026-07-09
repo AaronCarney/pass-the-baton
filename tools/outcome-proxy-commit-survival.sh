@@ -65,6 +65,9 @@ fi
 if [ "$JSON_ONLY" = "1" ]; then
   echo "$payload" | jq -c '. + {subkind: "commit_survival"}'
 else
-  outcome_proxies::emit_event commit_survival "$payload" || true
+  # Event-log payload is numeric-only (L0 D1) - slug stays out of the emitted
+  # outcome_proxy record (the --json standalone path above keeps it).
+  emit_payload="$(echo "$payload" | jq -c 'del(.slug)')"
+  outcome_proxies::emit_event commit_survival "$emit_payload" || true
 fi
 exit 0

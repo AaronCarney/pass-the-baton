@@ -41,6 +41,14 @@ assert "price: sonnet-4-6 cache_read = 0.30" \
   "[ \"$(cost_models::price claude-sonnet-4-6 cache_read)\" = '0.30' ]"
 assert "price: haiku-4-5 cache_read = 0.10" \
   "[ \"$(cost_models::price claude-haiku-4-5 cache_read)\" = '0.10' ]"
+assert "price: fable-5 base_in = 10.00" \
+  "[ \"$(cost_models::price claude-fable-5 base_in)\" = '10.00' ]"
+assert "price: fable-5 base_out = 50.00" \
+  "[ \"$(cost_models::price claude-fable-5 base_out)\" = '50.00' ]"
+assert "price: fable-5 cache_read = 1.00" \
+  "[ \"$(cost_models::price claude-fable-5 cache_read)\" = '1.00' ]"
+assert "min_cache_tokens: fable-5 = 2048" \
+  "[ \"$(cost_models::min_cache_tokens claude-fable-5)\" = '2048' ]"
 
 assert "price: unknown model returns exit 2" \
   "cost_models::price unknown-model base_in; [ \$? -eq 2 ]"
@@ -93,8 +101,12 @@ assert "list: contains claude-sonnet-4-5" \
   "echo \"\$list_out\" | grep -q 'claude-sonnet-4-5'"
 assert "list: contains claude-haiku-4-5" \
   "echo \"\$list_out\" | grep -q 'claude-haiku-4-5'"
-assert "list: exactly 5 lines" \
-  "[ \"$(cost_models::list | wc -l | tr -d ' ')\" = '5' ]"
+assert "list: contains claude-opus-4-8" \
+  "echo \"\$list_out\" | grep -q 'claude-opus-4-8'"
+assert "list: contains claude-fable-5" \
+  "echo \"\$list_out\" | grep -q 'claude-fable-5'"
+assert "list: count == ${#_CM_MODELS[@]} (canonical array length)" \
+  "[ \"$(cost_models::list | wc -l | tr -d ' ')\" = \"${#_CM_MODELS[@]}\" ]"
 
 # ----- Group E: cost_models::cost_of_turn -----
 echo

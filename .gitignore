@@ -15,14 +15,33 @@ tools/cleanup-cron-wrapper.sh
 # Internal task-summary artifacts from L2 work (per-task notes, not shipped)
 docs/sessions/
 
+# Internal planning + decision records (not part of the public repo)
+docs/internals/
+docs/plans/
+
 # Internal research dossiers (not part of the public repo)
 docs/research/*.md
 
-# Exception: audit-metadata bootstrap is committed; runtime files remain ignored
-!.baton/audit-metadata.json
-
 # Deferred-scope artifacts kept locally for future sister-repo implementation; not OSS scope
 .archive/
+
+# Maintainer-only, never shipped. The append-only publish model pushes the tracked
+# tree verbatim, so anything private MUST be untracked (this is now the sole exclusion
+# mechanism - the old flat-squash publish-exclude filter is retired). Mirrors
+# tools/publish-exclude.txt, which publish-scan.sh still reads as its scan config.
+#   Pre-publish gate (maintainer runs it; users never do):
+tools/publish-scan.sh
+tools/publish-exclude.txt
+.claude/hooks/tests/test-publish-scan.sh
+#   Cost-model validation apparatus (standalone; no shipping code invokes it):
+tools/audit-stage1.sh
+tools/audit-stage2.sh
+tools/cost-compare-counterfactual.sh
+.claude/hooks/tests/test-audit-stage1.sh
+.claude/hooks/tests/test-audit-stage2.sh
+.claude/hooks/tests/test-cost-compare-counterfactual.sh
+#   Accumulated runtime state (lib/audit-metadata.sh returns {} when absent, recreates on write):
+.baton/audit-metadata.json
 
 # Runtime-generated outcome-proxy rollup fixtures (written by test-outcome-proxy-* at run time)
 .claude/hooks/tests/fixtures/outcome-proxies/rollup-transcripts/main/

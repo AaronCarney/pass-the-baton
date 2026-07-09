@@ -70,7 +70,7 @@ git -C "$TMP_GIT" add file.txt
 GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
   git -C "$TMP_GIT" commit -q -m "init"
 
-bash "$COMMIT_SURVIVAL" --repo "$TMP_GIT" --slug "privacy-test-repo" 2>/dev/null || true
+bash "$COMMIT_SURVIVAL" --repo "$TMP_GIT" --slug "$S4" 2>/dev/null || true
 
 # ── Extract outcome_proxy payloads only ───────────────────────────────────
 OP_PAYLOADS=$(jq -r 'select(.event == "outcome_proxy") | .data | tojson' \

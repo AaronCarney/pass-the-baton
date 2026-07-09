@@ -12,10 +12,32 @@ source "$_SD/lib/cost-compare-model.sh"
 # shellcheck source=/dev/null
 source "$_SD/lib/tokens.sh"
 
+# CC6: source the shared _cfg::get resolver (env > config.json > default).
+# Self-contained: guard-source lib/config.sh; if unreachable, define a
+# FAITHFUL inline fallback so a dashboard config.json write is still honored
+# under plugin distribution. Precedent: .claude/hooks/lib/envelope.sh:26-48.
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/config.sh" 2>/dev/null || true
+fi
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  _cfg::get() {
+    local v; v="${!1:-}"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
+    local ck="${3:-$1}"
+    if [ -f "$cfg" ]; then
+      v="$(jq -r --arg k "$ck" '.[$k] // empty' "$cfg" 2>/dev/null || true)"
+      if [ -n "$v" ] && [ "$v" != 'null' ]; then printf '%s' "$v"; return 0; fi
+    fi
+    printf '%s' "${2:-}"
+  }
+fi
+
 DISCLAIMER="Token counts are an estimate computed from content size and Anthropic's published per-model tokenizer behavior. Actual API billing uses Anthropic's authoritative count, which may differ by up to ~5% on prose and up to ~35% on code or structured text for Opus 4.7. For a billing-grade figure, use \`bash tools/cost.sh --verify --corpus DIR\`."
 
 MODEL="claude-sonnet-4-6"; TRANSCRIPT="${BATON_TRANSCRIPT_PATH:-}"; JSON=0
-SUMMARY_MODEL="${BATON_SUMMARY_MODEL:-}"
+SUMMARY_MODEL="$(_cfg::get BATON_SUMMARY_MODEL "")"
 SUMMARY_TOKENS="${BATON_SUMMARY_TOKENS:-}"
 RIGOR='preprint'
 _SUMMARY_TOKENS_SOURCE_NOTE=""

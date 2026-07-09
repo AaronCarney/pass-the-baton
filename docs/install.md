@@ -191,7 +191,7 @@ Optional: how should this terminal name its workstream? (BATON_DISPLAY_NAME)
 bash tools/verify-install.sh
 ```
 
-Checks: each of the 5 core hook events (SessionStart, PreToolUse, PostToolUse, SessionEnd, UserPromptSubmit) has a checkpoint hook registered, statusline tick file appears within ~1s, full test suite passes (102 test scripts), idempotency re-run is a no-op.
+Checks: each of the 5 core hook events (SessionStart, PreToolUse, PostToolUse, SessionEnd, UserPromptSubmit) has a checkpoint hook registered, statusline tick file appears within ~1s, full test suite passes (114 test scripts), idempotency re-run is a no-op.
 
 `--pre-commit-only` runs the S2 smoke (E1-only path) for fast pre-commit gating.
 

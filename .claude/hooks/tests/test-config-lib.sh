@@ -47,5 +47,35 @@ unset BATON_PCT_THRESHOLD
 echo '{"BATON_PCT_THRESHOLD":"99"}' > "$CFG"
 _aeq '23' "$(_cfg::get BATON_PCT_THRESHOLD 23 threshold_pct)" '7c: uppercase key ignored when config_key given'
 
+# === _cfg::set round-trip (E-C deliverable 1) ===
+_aeq 'function' "$(type -t _cfg::set)" '_cfg::set is defined'
+
+# string write -> read back via same key
+echo '{}' > "$CFG"
+unset BATON_DISPLAY_NAME
+_cfg::set BATON_DISPLAY_NAME 'my stream'
+_aeq 'my stream' "$(_cfg::get BATON_DISPLAY_NAME '')" 'string set round-trips via _cfg::get'
+
+# numeric write (is_number) -> stored as JSON number, honored by runtime read path
+echo '{}' > "$CFG"
+unset BATON_PCT_THRESHOLD
+_cfg::set threshold_pct 30 number
+_aeq 'number' "$(jq -r '.threshold_pct|type' "$CFG")" 'numeric set stores a JSON number'
+_aeq '30' "$(_cfg::get BATON_PCT_THRESHOLD 23 threshold_pct)" 'numeric set round-trips via legacy config_key'
+
+# overwrite an existing key, leave siblings intact
+echo '{"template":"free","threshold_pct":30}' > "$CFG"
+_cfg::set threshold_pct 41 number
+_aeq '41' "$(jq -r '.threshold_pct' "$CFG")" 'overwrite updates the key'
+_aeq 'free' "$(jq -r '.template' "$CFG")" 'overwrite leaves siblings intact'
+
+# seeds a missing config file rather than erroring
+rm -f "$CFG"
+_cfg::set template task
+_aeq 'task' "$(jq -r '.template' "$CFG")" 'set seeds a missing config.json'
+
+# valid JSON after writes (atomic mv left no partial/temp content)
+_aeq '0' "$(jq -e . "$CFG" >/dev/null 2>&1; echo $?)" 'config.json stays valid JSON after set'
+
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ]

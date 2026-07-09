@@ -159,5 +159,27 @@ printf '%s\n' "$n_out" | grep -E '^[[:space:]]*threshold_pct:' | grep -q '37' \
 printf '%s\n' "$n_out" | grep -E '^[[:space:]]*display_name:' | grep -q 'roundtrip-ws' \
   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: show should reflect display_name after set" >&2; }
 
+# CC6 E-A: displayed defaults must equal consumer defaults (fresh config, no env).
+rm -f "$XDG_CONFIG_HOME/baton/config.json"; echo '{}' > "$XDG_CONFIG_HOME/baton/config.json"
+fresh=$( unset BATON_TRACKING_TTL_DAYS BATON_TMP_TTL_HOURS BATON_SUMMARY_MODEL BATON_EVENT_LOG BATON_TOKEN_RATIOS; bash "$DASH" show )
+val_of(){ printf '%s\n' "$fresh" | sed -n "s/^[[:space:]]*$1[[:space:]]*//p"; }
+_aeq 7  "$(val_of 'BATON_TRACKING_TTL_DAYS:')" 'tracking ttl default shows 7'
+_aeq 24 "$(val_of 'BATON_TMP_TTL_HOURS:')"     'tmp ttl default shows 24'
+_aeq '' "$(val_of 'BATON_SUMMARY_MODEL:')"      'summary model default empty'
+case "$(val_of 'BATON_EVENT_LOG:')" in */baton/hook-events.jsonl) PASS=$((PASS+1));; *) FAIL=$((FAIL+1)); echo 'FAIL: EVENT_LOG default should be XDG state path' >&2;; esac
+case "$(val_of 'BATON_TOKEN_RATIOS:')" in */baton/token-ratios.sh) PASS=$((PASS+1));; *) FAIL=$((FAIL+1)); echo 'FAIL: TOKEN_RATIOS default should be the ratios path' >&2;; esac
+
+# E-C: set still round-trips after routing through _cfg::set
+CFG="$XDG_CONFIG_HOME/baton/config.json"
+bash "$DASH" set threshold_pct=44 >/dev/null 2>&1
+_aeq 44 "$(jq -r '.threshold_pct' "$CFG")" 'threshold_pct set persists (number)'
+_aeq number "$(jq -r '.threshold_pct|type' "$CFG")" 'threshold_pct stored as JSON number'
+bash "$DASH" set display_name=hi >/dev/null 2>&1
+_aeq string "$(jq -r '.display_name|type' "$CFG")" 'string key stored as JSON string'
+if jq -e . "$CFG" >/dev/null 2>&1; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'FAIL: config.json valid after dashboard sets' >&2; fi
+# E-C: the now-false 'telemetry only / fixed 23%' note must be gone (honesty fix)
+if ! bash "$DASH" show 2>/dev/null | grep -qi 'fixed 23'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'FAIL: show note no longer claims fixed-23 trigger' >&2; fi
+if ! bash "$DASH" show 2>/dev/null | grep -qi 'telemetry only'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'FAIL: show note no longer claims telemetry-only' >&2; fi
+
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ]

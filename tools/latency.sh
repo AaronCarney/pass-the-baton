@@ -29,6 +29,9 @@
 # Read-only. No network.
 set -uo pipefail
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/config.sh"   # CC6
+
 SINCE_HOURS=24
 TOOL_FILTER=""
 JSON_MODE=0
@@ -65,10 +68,8 @@ done
 # Resolve event log path.
 if [[ -n "$EVENT_LOG_OVERRIDE" ]]; then
   LOG_PATH="$EVENT_LOG_OVERRIDE"
-elif [[ -n "${BATON_EVENT_LOG:-}" ]]; then
-  LOG_PATH="$BATON_EVENT_LOG"
 else
-  LOG_PATH="${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl"
+  LOG_PATH="$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")"
 fi
 
 # Build the list of input streams (live log + optional rotated shards).

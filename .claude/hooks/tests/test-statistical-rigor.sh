@@ -96,33 +96,11 @@ fi
 echo "=== L1 §E15 smoke: $SMOKE_PASS passed, $SMOKE_FAIL failed ===" >&2
 [ $SMOKE_FAIL -eq 0 ] || FAIL=$((FAIL+1))
 
-# --- F18: shellcheck diff vs pre-T1 baseline ---
-# Compare SC code occurrence counts only - line-number drift from T1-T6 insertions
-# does not constitute a new violation.
-shellcheck -e SC1091,SC2155 "$REPO_ROOT/tools/"*.sh "$REPO_ROOT/lib/"*.sh > /tmp/shellcheck-post.txt 2>&1 || true
-if [ -f /tmp/shellcheck-baseline.txt ]; then
-  base_codes=$(grep -oE 'SC[0-9]+' /tmp/shellcheck-baseline.txt | sort | uniq -c | sort -k2)
-  post_codes=$(grep -oE 'SC[0-9]+' /tmp/shellcheck-post.txt | sort | uniq -c | sort -k2)
-  # New violations: SC codes with higher count in post than baseline, or new codes.
-  new_viols=$(comm -13 \
-    <(grep -oE 'SC[0-9]+' /tmp/shellcheck-baseline.txt | sort -u) \
-    <(grep -oE 'SC[0-9]+' /tmp/shellcheck-post.txt | sort -u) | wc -l)
-  # Also check for increased counts on existing codes.
-  base_total=$(grep -oE 'SC[0-9]+' /tmp/shellcheck-baseline.txt | wc -l)
-  post_total=$(grep -oE 'SC[0-9]+' /tmp/shellcheck-post.txt | wc -l)
-  net_increase=$(( post_total - base_total ))
-  if [ "$new_viols" -gt 0 ] || [ "$net_increase" -gt 0 ]; then
-    echo "F18 FAIL: net_increase=$net_increase new SC codes=$new_viols vs baseline" >&2
-    echo "Baseline SC counts: $base_codes" >&2
-    echo "Post SC counts: $post_codes" >&2
-    FAIL=$((FAIL+1))
-  else
-    echo "F18 OK: zero net new shellcheck violations vs baseline (line-number drift ignored)" >&2
-  fi
-else
-  echo 'F18 ERROR: /tmp/shellcheck-baseline.txt not captured pre-T1; T1 step 0 must run first' >&2
-  FAIL=$((FAIL+1))
-fi
+# (F18 retired) The former shellcheck differential gate compared against a
+# /tmp/shellcheck-baseline.txt captured by a one-time manual pre-implementation
+# step; that baseline never exists in a standalone or CI run, so the gate could
+# only ever error. It was a build-time gate for the original E15 change, not an
+# ongoing invariant, and shellcheck is not a CI dependency.
 
 # --- F25: L1 cross-check codified ---
 cat > /tmp/closeout-crosscheck.txt <<'EOF'

@@ -174,9 +174,11 @@ assert "A1: hook-events.jsonl exists" "[ -e '$E2E_LOG' ]"
 MODE=$(stat -c '%a' "$E2E_LOG" 2>/dev/null || echo '?')
 assert "A2: log mode is 0600" "[ '$MODE' = '600' ]"
 
-# A3. File contains exactly 4 lines (one per hook).
+# A3. File contains exactly 5 lines: one per hook (4), plus the tuner_snapshot that
+# session-start.sh also emits under BATON_COLLECT=1 (E-H). The 4 core hook events are
+# each asserted present once by A5/B3; this count guards against unexpected duplication.
 LINE_COUNT=$(wc -l < "$E2E_LOG")
-assert "A3: log contains 4 lines" "[ '$LINE_COUNT' = '4' ]"
+assert "A3: log contains 5 lines (4 hooks + session-start tuner_snapshot)" "[ '$LINE_COUNT' = '5' ]"
 
 # A4. Every line parses as JSON with schema_version=1.
 BAD_SCHEMA=$(while IFS= read -r line; do

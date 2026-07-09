@@ -40,6 +40,8 @@ source "$_SD/lib/aggregator-v2.sh"
 source "$_SD/lib/audit-metadata.sh"
 # shellcheck source=/dev/null
 source "$_SD/lib/gamma-bands.sh"
+# shellcheck source=/dev/null
+source "$_SD/lib/config.sh"   # CC6
 
 DISCLAIMER="Token counts are an estimate computed from content size and Anthropic's published per-model tokenizer behavior. Actual API billing uses Anthropic's authoritative count, which may differ by up to ~5% on prose and up to ~35% on code or structured text for Opus 4.7. For a billing-grade figure, use \`bash tools/cost.sh --verify --corpus DIR\`."
 
@@ -75,8 +77,8 @@ EOF
 }
 
 CORPUS="${HOME}/.claude/projects"
-MODEL="${BATON_COST_MODEL:-claude-sonnet-4-6}"
-SUMMARY_MODEL="${BATON_SUMMARY_MODEL:-}"
+MODEL="$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)"
+SUMMARY_MODEL="$(_cfg::get BATON_SUMMARY_MODEL "")"
 SUMMARY_TOKENS="${BATON_SUMMARY_TOKENS:-}"
 AUTOMEMORY_TOKENS="${BATON_AUTOMEMORY_TOKENS:-5000}"
 LIMIT=0
@@ -451,6 +453,15 @@ _attach_ci() {
       printf '%s' "$agg"; return
       ;;
   esac
+  # stats-bootstrap prints {"error":...} (and exits non-zero) when a CI is
+  # mathematically undefined for this method - e.g. --log studentized on a value
+  # set containing a non-positive cost. Don't attach an error object as if it were
+  # a CI; skip it, same contract as the empty-vals path above.
+  if [ -z "$ci" ] || ! printf '%s' "$ci" | jq -e 'has("method")' >/dev/null 2>&1; then
+    echo "workshop: CI undefined for method-key (file: $vals); skipped ($(printf '%s' "$ci" | jq -r '.error // "malformed"' 2>/dev/null))" >&2
+    printf '%s' "$agg"
+    return
+  fi
   jq -n --argjson agg "$agg" --argjson ci "$ci" '$agg + {ci: $ci}'
 }
 

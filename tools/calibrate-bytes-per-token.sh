@@ -5,13 +5,16 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/config.sh"   # CC6
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 CORPUS_DIR="./corpus"
 MODEL="claude-sonnet-4-6"
 WRITE_MODE=0
-RATIOS_FILE="${BATON_TOKEN_RATIOS:-$HOME/.config/baton/token-ratios.sh}"
+RATIOS_FILE="$(_cfg::get BATON_TOKEN_RATIOS "$HOME/.config/baton/token-ratios.sh")"
 
 # ---------------------------------------------------------------------------
 # Usage / --help

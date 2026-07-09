@@ -109,6 +109,8 @@ Emitted by `.claude/hooks/post-tool-batch.sh` on every PostToolBatch hook fire, 
 | `fresh_input` | integer | Uncached input tokens. |
 | `output` | integer | Output tokens. |
 | `turn_index` | integer | Count of assistant messages observed in the trailing 50 transcript lines. |
+| `threshold` | integer | The checkpoint threshold in effect for this turn, via `checkpoint_threshold` (env > config > default 23). Lets cost be correlated to the threshold setting. |
+| `summary_turn` | boolean | `true` on the first turn after a `/clear` (detected by `turn_index` dropping). Marks the re-prime turn; its output tokens feed the summary-tokens running mean (see [cost-model](cost-model.md)). |
 | `transcript_basename` | string | Basename of the transcript file. |
 
 ### `cache_anomaly`
@@ -137,6 +139,41 @@ Emitted by `.claude/hooks/context-checkpoint.sh` when the canonical-JSON SHA-256
 Emitted by `.claude/hooks/session-start.sh`'s pre-warm path when `BATON_PREWARM=1` and gates pass.
 
 `prewarm_ok`: `{model, cache_creation_input_tokens}`. `prewarm_failed`: `{status_code, error}`.
+
+### `tuner_snapshot` - per main session (collection-gated)
+
+Emitted by `.claude/hooks/session-start.sh` once per **main** session, from inside the collection-gated controller block (after `threshold_controller::run_once`), via `threshold_controller::emit_snapshot`. Records the **resolved** threshold-tuner knob vector so a session's knob setting can be joined to its `cost_rollup` by `session_id` (`cost_rollup` always carries it - `post-tool-batch.sh:118`). `outcome_proxy` rows do **not** reliably carry `session_id`: `outcome_proxies::emit_event` merges only `subkind`+`threshold` (`.claude/hooks/lib/outcome-proxies.sh:43-48`), so `follow_up`/`commit_survival` are slug/workstream aggregates with no `session_id`, and `retry`/`code_execution` include it only when the originating hook had one. Join the tuner knobs to `outcome_proxy` via the slug/workstream rollup, not directly by `session_id`. The call sits inside the collection gate (an open arc or `BATON_COLLECT=1`), so a non-collecting session never emits it (and `envelope::emit` additionally self-gates on collection); subagent (Case B) sessions exit before the block. `threshold` is read **after** any `run_once` apply, so it reflects the session's effective value (including a `BATON_PCT_THRESHOLD` pin).
+
+| Key | Type | Meaning |
+|---|---|---|
+| `session_id` | string | SDK session ID. Direct join key to `cost_rollup`. `outcome_proxy` rows are slug/workstream-scoped (no reliable `session_id`), so join those via the rollup, not directly. |
+| `threshold` | integer | Effective checkpoint threshold (pct) after this session's tick, via `checkpoint_threshold`. |
+| `setpoint` | string | Resolved `tune_setpoint` - target score (score-space, may be fractional). |
+| `deadband` | string | Resolved `tune_deadband` - tolerance band around the setpoint (score-space). |
+| `step` | integer | Resolved `tune_step` - threshold step size in pct points. |
+| `safety_min` | integer | Resolved `tune_safety_min` - lower threshold safety bound. |
+| `safety_max` | integer | Resolved `tune_safety_max` - upper threshold safety bound. |
+| `dwell_seconds` | integer | Resolved `tune_dwell_seconds` - minimum seconds between applies. |
+| `score_fn` | string | Resolved `tune_score_fn` - selected scoring function (default `score_hold`, a no-op). |
+| `collect` | integer | Resolved `BATON_COLLECT` (0/1) at emit time. |
+
+The recorded values are the tuner's *placeholder* defaults until the owner sets real numbers; this event is what makes the placeholder-to-tuned transition observable per session.
+
+### `threshold_applied` - adaptive-tuner apply (collection-gated)
+
+Emitted by `lib/threshold-controller.sh::_emit_applied` **only** when the tuner
+actually writes a new threshold - i.e. the decision was not HOLD and every guard
+(env-pin, safety band, dwell) passed. Under the shipped placeholder
+`score_fn=score_hold` the tuner always decides HOLD, so this event is **not
+emitted in practice today**; it becomes live once a real scoring function is
+configured. No consumer reads it yet.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `old_threshold` | integer | Threshold before the apply. |
+| `new_threshold` | integer | Threshold after the apply. |
+| `action` | string | `up` or `down` (never `hold` - a hold emits nothing). |
+| `score` | string | The score that drove the decision (score-space; may be fractional). |
 
 ### What is not captured today
 

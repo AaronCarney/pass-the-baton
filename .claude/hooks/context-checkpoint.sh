@@ -1,5 +1,5 @@
 #!/bin/bash
-# PreToolUse hook. At 23% context fill, marks the session as PENDING,
+# PreToolUse hook. At the configured threshold (default 23% context fill), marks the session as PENDING,
 # lists this terminal's old progress files for archival, and injects the
 # save-progress workflow into Claude's next turn. Once the post-write
 # trigger sets DONE, blocks all further tool calls until /clear.
@@ -22,6 +22,13 @@ source "$SCRIPT_DIR/lib/template-resolve.sh"   # tpl::resolve_active_template
 source "$SCRIPT_DIR/lib/template-render.sh"    # tpl::render_progress_file
 _FC_SESSION_ID="$SESSION_ID"
 
+# Single threshold source (E-B): the gate comparisons AND the telemetry field
+# below both read this one value, so the trigger and the reported `threshold`
+# can never diverge. checkpoint_threshold (workstream-lib.sh) is bounds-validated;
+# the inline guard keeps the hook safe if the helper is unavailable.
+CC_THRESHOLD=$(checkpoint_threshold 2>/dev/null || echo 23)
+[[ "$CC_THRESHOLD" =~ ^[0-9]+$ ]] || CC_THRESHOLD=23
+
 # Emit PreToolUse envelope exactly once (CC2). Trap on EXIT to cover every
 # early-return path. Failures go to stderr, never alter the hook exit code.
 _CC_PCT=""
@@ -32,8 +39,7 @@ _emit_cc() {
   _CC_EMITTED=1
   local _pct_num="${_CC_PCT:-0}"
   [[ "$_pct_num" =~ ^[0-9]+$ ]] || _pct_num=0
-  local _thr; _thr=$(checkpoint_threshold 2>/dev/null || echo 23)
-  [[ "$_thr" =~ ^[0-9]+$ ]] || _thr=23
+  local _thr="$CC_THRESHOLD"
   local _data
   _data=$(jq -cn --arg tn "$TOOL_NAME" --argjson pct "$_pct_num" --argjson thr "$_thr" --argjson ps "$_CC_PENDING" \
     '{tool_name:$tn, context_pct:$pct, threshold:$thr, pending_set:$ps}' 2>/dev/null) || _data='{}'
@@ -55,9 +61,9 @@ if [ -n "$AGENT_ID" ]; then
   PCT=$(cat "/tmp/claude-context-pct-${PARENT_SID}" 2>/dev/null)
   [ -z "$PCT" ] && exit 0
   # Treat non-integer PCT (e.g. "30.5", whitespace) as "no value" - bare
-  # `[ "$PCT" -lt 23 ]` errors on those and would fall through to trigger.
+  # `[ "$PCT" -lt "$CC_THRESHOLD" ]` errors on those and would fall through to trigger.
   [[ "$PCT" =~ ^[0-9]+$ ]] || exit 0
-  [ "$PCT" -lt 23 ] && exit 0
+  [ "$PCT" -lt "$CC_THRESHOLD" ] && exit 0
 
   # Parent checkpoint already done - block subagent
   if [ -f "/tmp/baton-done-${PARENT_SID}" ]; then
@@ -149,7 +155,7 @@ if [ -z "$PCT" ]; then
 fi
 # Treat non-integer PCT as "no value" - see subagent block above for rationale.
 [[ "$PCT" =~ ^[0-9]+$ ]] || exit 0
-[ "$PCT" -lt 23 ] && exit 0
+[ "$PCT" -lt "$CC_THRESHOLD" ] && exit 0
 
 FLAG="/tmp/claude-context-triggered-${SESSION_ID}"
 DONE="/tmp/baton-done-${SESSION_ID}"

@@ -20,6 +20,28 @@ source "$_SS_SCRIPT_DIR/lib/envelope.sh" 2>/dev/null || true
 # shellcheck disable=SC1091
 source "$_SS_SCRIPT_DIR/lib/session-start-helpers.sh" 2>/dev/null || true
 
+# CC6: source the shared _cfg::get resolver (env > config.json > default).
+# Self-contained: guard-source lib/config.sh; if unreachable, define a
+# FAITHFUL inline fallback so a dashboard config.json write is still honored
+# under plugin distribution. Precedent: .claude/hooks/lib/envelope.sh:26-48.
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lib/config.sh" 2>/dev/null || true
+fi
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  _cfg::get() {
+    local v; v="${!1:-}"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
+    local ck="${3:-$1}"
+    if [ -f "$cfg" ]; then
+      v="$(jq -r --arg k "$ck" '.[$k] // empty' "$cfg" 2>/dev/null || true)"
+      if [ -n "$v" ] && [ "$v" != 'null' ]; then printf '%s' "$v"; return 0; fi
+    fi
+    printf '%s' "${2:-}"
+  }
+fi
+
 # Emit SessionStart envelope exactly once on EXIT (CC2). Failures go to stderr,
 # never alter the hook exit code.
 _SS_WS=""
@@ -338,7 +360,7 @@ prewarm::_request() {
 
 _prewarm_run() {
   # All gates must pass; any miss = silent return.
-  [ "${BATON_PREWARM:-0}" = "1" ] || return 0
+  [ "$(_cfg::get BATON_PREWARM 0)" = "1" ] || return 0
   case "$MATCHER" in clear|resume) ;; *) return 0 ;; esac
   [ -n "${ANTHROPIC_API_KEY:-}" ] || return 0
   local sys_file="${BATON_PREWARM_SYSTEM_FILE:-}"
@@ -352,7 +374,7 @@ _prewarm_run() {
   # shellcheck source=../../lib/cost-models.sh
   source "$_lib_dir/cost-models.sh" 2>/dev/null || return 0
 
-  local alias_model="${BATON_COST_MODEL:-claude-opus-4-7}"
+  local alias_model; alias_model="$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)"
   local model_id; model_id=$(cost_models::resolve_id "$alias_model" 2>/dev/null)
 
   # Build request body via jq.
@@ -409,6 +431,27 @@ if [ -x "$SWEEP" ]; then
     BATON_PROJECT_DIR="$PROJECT_DIR" nohup bash "$SWEEP" --if-due >/dev/null 2>&1 </dev/null &
   fi
   disown 2>/dev/null || true
+fi
+
+# E-G: auto-tick the threshold controller ONCE per main session, gated on collection.
+# run_once is lightweight and, under the placeholder score_hold, a guaranteed no-op; it only
+# runs when collection is on (an open arc or BATON_COLLECT=1), so a normal session pays
+# nothing. Applying here lands any new threshold in config.json before this session's first
+# PreToolUse checkpoint reads it. The subagent (Case B) path exited above, so subagents never tune.
+_TUNE_CTRL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd -P)/threshold-controller.sh"
+if [ -r "$_TUNE_CTRL" ]; then
+  # shellcheck disable=SC1090
+  source "$_TUNE_CTRL" 2>/dev/null || true
+  if declare -F threshold_controller::collection_on >/dev/null 2>&1 \
+     && threshold_controller::collection_on; then
+    threshold_controller::run_once >/dev/null 2>&1 || true
+    # E-H: record this session's resolved tuner knob vector (joins to cost_rollup/outcome_proxy
+    # by session_id). Read-only; threshold read AFTER run_once so it reflects any apply. Reached
+    # only inside this collection gate; envelope::emit self-gates too.
+    if declare -F threshold_controller::emit_snapshot >/dev/null 2>&1; then
+      threshold_controller::emit_snapshot "$SESSION_ID" >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 
 exit 0

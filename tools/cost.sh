@@ -19,6 +19,8 @@ source "$COST_MODELS_LIB"
 source "$TOKENS_LIB"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/lib/eventlog.sh"   # CC20: tolerant event-log record reader
+# shellcheck source=/dev/null
+source "$REPO_ROOT/lib/config.sh"   # CC6: env > config.json > default for BATON_* keys
 
 # ---------------------------------------------------------------------------
 # CC6 disclaimer (canonical text)
@@ -29,7 +31,7 @@ CC6_DISCLAIMER="Token counts are an estimate computed from content size and Anth
 # Argument parsing
 # ---------------------------------------------------------------------------
 SESSION_UUID=""
-MODEL="${BATON_COST_MODEL:-claude-sonnet-4-6}"
+MODEL="$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)"
 GEO_FLAG=""
 FAST_FLAG=""
 VERIFY_MODE=0
@@ -79,7 +81,7 @@ done
 # --arc mode: sum stamped cost_rollup events for one arc, price per-model
 # ---------------------------------------------------------------------------
 if [[ -n "${ARC_SLUG:-}" ]]; then
-  log="${BATON_EVENT_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl}"
+  log="$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")"
   declare -A CR CW5 CW1 FRESH OUT; events=0
   if [[ -f "$log" ]]; then
     while IFS=$'\t' read -r model cr cw5 cw1 fi out; do
@@ -266,7 +268,7 @@ if [[ "$VERIFY_MODE" -eq 1 ]]; then
   fi
 
   CALIBRATE="$REPO_ROOT/tools/calibrate-bytes-per-token.sh"
-  RATIOS_FILE="${BATON_TOKEN_RATIOS:-$HOME/.config/baton/token-ratios.sh}"
+  RATIOS_FILE="$(_cfg::get BATON_TOKEN_RATIOS "$HOME/.config/baton/token-ratios.sh")"
 
   # Capture old ratios before calibration
   declare -A old_ratios
@@ -358,6 +360,12 @@ _priced_alias_for_turn() {
   if [[ -z "${_CM_PRICE[${alias}:base_in]+set}" ]]; then
     alias="${raw%-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]}"
     if [[ -z "${_CM_PRICE[${alias}:base_in]+set}" ]]; then
+      # Genuine unknown model: priced at the default $_model_for_cost rate and
+      # disclosed below. (--arc zeroes unpriced models; the main path has a
+      # configured default proxy, so it discloses the proxy instead of zeroing
+      # real spend - intentional divergence.) The genuine-unknown tracking
+      # (_FALLBACK_PRICED) happens in the parent loop, not here: this function
+      # runs in a $(...) subshell, so a mutation here would be lost.
       alias="$_model_for_cost"
     fi
   fi
@@ -442,6 +450,7 @@ PER_SESSION_USD=()
 PER_TURN_USD=0
 TURN_COUNT=0
 declare -A _TURN_ALIAS_CACHE=()
+declare -A _FALLBACK_PRICED=()   # raw per-turn models priced at the default (Track-2 item 5 honesty)
 
 # Pre-build extra flags array once so the distribution path applies the same
 # geo / fast multipliers as the grand-total cost_of_turn calls below - keeps
@@ -466,6 +475,17 @@ for tp in "${TRANSCRIPT_PATHS[@]}"; do
     # falling back to $_model_for_cost when the turn's model is absent, the
     # literal null, or not derivable to a priced alias.
     _turn_alias=$(_priced_alias_for_turn "$turn_raw_model")
+    # Track genuinely-unknown per-turn models here in the PARENT shell - the
+    # function above runs in a $(...) subshell so a mutation there is lost.
+    # Skip under --fast (every turn is pinned to the default) and skip the
+    # empty/null normal-turn case. Mirrors the derivation probes in the function.
+    if [[ -z "$FAST_FLAG" && -n "$turn_raw_model" && "$turn_raw_model" != "null" \
+          && -z "${_CM_PRICE[${turn_raw_model}:base_in]+set}" ]]; then
+      _tr_stripped="${turn_raw_model%-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]}"
+      if [[ -z "${_CM_PRICE[${_tr_stripped}:base_in]+set}" ]]; then
+        _FALLBACK_PRICED["$turn_raw_model"]=1
+      fi
+    fi
     _turn_usd=$(cost_models::cost_of_turn "$_turn_alias" \
       "$cr" "$cw5" "$cw1" "$fi" "$out" \
       "${EXTRA_FLAGS_ARR[@]+"${EXTRA_FLAGS_ARR[@]}"}")
@@ -541,6 +561,12 @@ USD_OUT=$(cost_models::cost_of_turn "$_model_for_cost" 0 0 0 0 "$TOT_OUT" "${EXT
 # canonical "0.000000" shape rather than a bare "0".
 USD_TOTAL=$(awk -v t="$PER_TURN_USD" 'BEGIN{printf "%.6f", t}')
 
+# Track-2 item 5: per-turn models not in the price table, priced at the default.
+_fallback_json='[]'
+if [[ ${#_FALLBACK_PRICED[@]} -gt 0 ]]; then
+  _fallback_json=$(printf '%s\n' "${!_FALLBACK_PRICED[@]}" | jq -R . | jq -cs .)
+fi
+
 # Session ID for display
 SESSION_ID="${SESSION_UUID:-${TRANSCRIPT_PATHS[0]##*/}}"
 SESSION_ID="${SESSION_ID%.jsonl}"
@@ -598,6 +624,7 @@ if [[ "$JSON_MODE" -eq 1 ]]; then
       --argjson dist_p75 "$DIST_P75" \
       --argjson dist_p95 "$DIST_P95" \
       --argjson dist_max "$DIST_MAX" \
+      --argjson fallback_priced_models "$_fallback_json" \
       --arg disclaimer "$CC6_DISCLAIMER" \
       '{
         session_id: $session_id,
@@ -622,6 +649,7 @@ if [[ "$JSON_MODE" -eq 1 ]]; then
           max: $dist_max,
           total_usd: $total_usd
         },
+        fallback_priced_models: $fallback_priced_models,
         disclaimer: $disclaimer
       }'
   else
@@ -636,6 +664,7 @@ if [[ "$JSON_MODE" -eq 1 ]]; then
       --argjson total_usd "$USD_TOTAL" \
       --argjson cost_usd "$USD_TOTAL" \
       --argjson turns "$TURN_COUNT" \
+      --argjson fallback_priced_models "$_fallback_json" \
       --arg disclaimer "$CC6_DISCLAIMER" \
       '{
         session_id: $session_id,
@@ -650,6 +679,7 @@ if [[ "$JSON_MODE" -eq 1 ]]; then
         total_usd: $total_usd,
         cost_usd: $cost_usd,
         turns: $turns,
+        fallback_priced_models: $fallback_priced_models,
         disclaimer: $disclaimer
       }'
   fi
@@ -665,6 +695,10 @@ else
   printf '%-16s %12d tok    $%s\n' " output"       "$TOT_OUT" "$USD_OUT"
   printf '%s\n' "$SEP"
   printf 'TOTAL                          $%s\n' "$USD_TOTAL"
+  if [[ ${#_FALLBACK_PRICED[@]} -gt 0 ]]; then
+    printf 'WARNING: %d per-turn model(s) not in the price table; priced at the default (%s): %s\n' \
+      "${#_FALLBACK_PRICED[@]}" "$_model_for_cost" "${!_FALLBACK_PRICED[*]}"
+  fi
   if [[ "$DIST_MODE" -eq 1 ]] && [[ "$DIST_N" -gt 0 ]]; then
     printf '%s\n' "$SEP"
     printf 'Distribution across %d session(s):\n' "$DIST_N"

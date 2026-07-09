@@ -16,6 +16,8 @@ setup() {
   TMP="$(mktemp -d)"
   export XDG_STATE_HOME="$TMP"
   export BATON_EVENT_LOG="$TMP/events.jsonl"
+  export XDG_CONFIG_HOME="$TMP/config"; mkdir -p "$XDG_CONFIG_HOME/baton"
+  echo '{"threshold_pct":37}' > "$XDG_CONFIG_HOME/baton/config.json"
   export CLAUDE_TERMINAL_ID="term-t2"
   unset BATON_EVENT_LOG_DISABLE
   # PARENT session transcript - distinct usage + model. Must NOT leak.
@@ -46,6 +48,7 @@ assert_eq "$(printf '%s' "$line" | jq -r '.data.model')" "claude-sub-y" "model f
 assert_eq "$(printf '%s' "$line" | jq -r '.data.agent_id')" "a1d5" "agent_id stamped"
 assert_eq "$(printf '%s' "$line" | jq -r '.data.agent_type')" "general-purpose" "agent_type stamped"
 assert_eq "$(printf '%s' "$line" | jq -r '.data.transcript_basename')" "subagent.jsonl" "transcript_basename is sub-agent basename"
+assert_eq "$(printf '%s' "$line" | jq -r '.data.threshold')" "37" "active threshold stamped (E-C)"
 teardown
 
 setup

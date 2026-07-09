@@ -12,6 +12,9 @@
 # No network. Read-only.
 set -u
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/config.sh"   # CC6
+
 WARNED=0
 
 # Default log location.
@@ -46,7 +49,7 @@ is_network_fs() {
 }
 
 # Resolve log path.
-LOG="${BATON_EVENT_LOG:-$(default_event_log)}"
+LOG="$(_cfg::get BATON_EVENT_LOG "$(default_event_log)")"
 PARENT="$(dirname "$LOG")"
 
 echo "doctor: event log path: $LOG"

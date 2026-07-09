@@ -15,9 +15,11 @@ _cfg::get() {
   local key="$1"
   local default="${2:-}"
   local cfg_key="${3:-$key}"
-  # 1. env var wins.
+  # 1. env var wins. Indirect expansion (not printenv) so a NON-exported shell
+  # var is honored too - restores the pre-CC6 `${VAR:-}` contract that callers
+  # like cleanup-cron.sh (non-exported BATON_ARCHIVE_DIR) depend on.
   local env_val
-  env_val="$(printenv "$key" 2>/dev/null || true)"
+  env_val="${!key:-}"
   if [ -n "$env_val" ]; then
     printf '%s' "$env_val"
     return 0
@@ -37,4 +39,37 @@ _cfg::get() {
   printf '%s' "$default"
 }
 
+_cfg::set() {
+  # Usage: _cfg::set KEY VALUE [is_number]
+  # Atomically write .[KEY]=VALUE into config.json (env layer is NOT touched - this only
+  # persists the config.json layer that _cfg::get reads second). When is_number is non-empty
+  # the value is written as a JSON number (--argjson); otherwise as a JSON string (--arg).
+  # Self-contained: resolves its own path, seeds a missing dir/file, atomic mktemp+mv under flock.
+  # The sole config WRITE path (mirrors _cfg::get as the sole READ path) so the dashboard and the
+  # threshold tuner cannot drift. Round-trips with _cfg::get (use the persisted config_key as KEY,
+  # e.g. _cfg::set threshold_pct 30 number  <->  _cfg::get BATON_PCT_THRESHOLD 23 threshold_pct).
+  local key="$1" value="$2" is_number="${3:-}"
+  local cfg; cfg="$(_cfg::path)"
+  mkdir -p "$(dirname "$cfg")"
+  [ -f "$cfg" ] || printf '{}' > "$cfg"
+  local tmp; tmp=$(mktemp -p "$(dirname "$cfg")")
+  exec 9>"${cfg}.lock"
+  flock 9
+  if [ -n "$is_number" ]; then
+    jq --arg k "$key" --argjson v "$value" '.[$k] = $v' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+  else
+    jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+  fi
+  local rc=$?
+  rm -f "$tmp"
+  flock -u 9
+  exec 9>&-
+  return $rc
+}
+
 export -f _cfg::get 2>/dev/null || true
+export -f _cfg::set 2>/dev/null || true
+# Export the dependency too: _cfg::get calls _cfg::path internally, so a child
+# process inheriting the exported _cfg::get must also inherit _cfg::path or it
+# silently skips config.json. (CC6 code-review hardening.)
+export -f _cfg::path 2>/dev/null || true

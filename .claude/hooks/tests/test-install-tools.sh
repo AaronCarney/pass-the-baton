@@ -76,9 +76,12 @@ echo "## install-cron.sh"
 
 run_cron_env_written() {
   local d; d=$(mktemp -d)
+  # Real run (no --dry-run): install-cron.sh never modifies the crontab in any
+  # mode - it only prints the line. --dry-run now correctly writes nothing
+  # (E-D honesty fix), so the env-file write is exercised by a real run.
   XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR=/tmp/foo \
     BATON_ARCHIVE_DIR=/tmp/bar \
-    bash "$REPO_DIR/tools/install-cron.sh" --dry-run >/dev/null
+    bash "$REPO_DIR/tools/install-cron.sh" >/dev/null
   assert "CRON-ENV-WRITTEN: env file exists" "[ -f '$d/.config/baton/env' ]"
   assert "CRON-ENV-WRITTEN: env file contains BATON_PROJECT_DIR" \
     "grep -qE 'BATON_PROJECT_DIR=.*/tmp/foo' '$d/.config/baton/env'"
@@ -91,7 +94,7 @@ run_cron_env_written
 run_cron_wrapper_created() {
   local d; d=$(mktemp -d)
   XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR=/tmp/foo \
-    bash "$REPO_DIR/tools/install-cron.sh" --dry-run >/dev/null
+    bash "$REPO_DIR/tools/install-cron.sh" >/dev/null
   assert "CRON-WRAPPER: wrapper exists" "[ -x '$REPO_DIR/tools/cleanup-cron-wrapper.sh' ]"
   assert "CRON-WRAPPER: wrapper sources env file" \
     "grep -q 'source.*baton/env' '$REPO_DIR/tools/cleanup-cron-wrapper.sh'"
@@ -102,10 +105,10 @@ run_cron_wrapper_created
 run_cron_idempotent() {
   local d; d=$(mktemp -d)
   XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR=/tmp/foo \
-    bash "$REPO_DIR/tools/install-cron.sh" --dry-run >/dev/null
+    bash "$REPO_DIR/tools/install-cron.sh" >/dev/null
   cp "$d/.config/baton/env" "$d/first.env"
   XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR=/tmp/foo \
-    bash "$REPO_DIR/tools/install-cron.sh" --dry-run >/dev/null
+    bash "$REPO_DIR/tools/install-cron.sh" >/dev/null
   assert "CRON-IDEMPOTENT: env file byte-identical on re-run" \
     "cmp -s '$d/first.env' '$d/.config/baton/env'"
   rm -rf "$d"
@@ -117,8 +120,8 @@ run_cron_prints_crontab_line() {
   local out
   out=$(XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR=/tmp/foo \
     bash "$REPO_DIR/tools/install-cron.sh" --dry-run 2>&1)
-  assert "CRON-CRONTAB-LINE: output contains crontab snippet" \
-    "echo \"\$out\" | grep -qE '0 \*/48 \* \* \* .*cleanup-cron-wrapper.sh'"
+  assert "CRON-CRONTAB-LINE: output contains valid crontab snippet" \
+    "echo \"\$out\" | grep -qE '0 0 \*/2 \* \* .*cleanup-cron-wrapper.sh'"
   rm -rf "$d"
 }
 run_cron_prints_crontab_line

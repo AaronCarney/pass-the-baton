@@ -16,6 +16,12 @@ source "$HOOKS_DIR/lib/envelope.sh"
 # shellcheck source=lib/usage-tokens.sh
 source "$HOOKS_DIR/lib/usage-tokens.sh"
 
+# E-C: active threshold for self-describing cost data. workstream-lib is functions-only.
+if ! declare -F checkpoint_threshold >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$HOOKS_DIR/lib/workstream-lib.sh" 2>/dev/null || true
+fi
+
 # --- read stdin payload ------------------------------------------------------
 payload=$(cat)
 session_id=$(printf '%s' "$payload" | jq -r '.session_id // ""')
@@ -63,8 +69,9 @@ data_json=$(jq -cn \
   --argjson cw1 "$cache_write_1h" \
   --argjson fi "$fresh_input" \
   --argjson out "$output" \
+  --argjson threshold "$(checkpoint_threshold)" \
   --arg tb "$(basename "$agent_transcript_path")" \
-  '{session_id:$sid, model:$model, agent_id:$aid, agent_type:$atype,
+  '{session_id:$sid, model:$model, threshold:$threshold, agent_id:$aid, agent_type:$atype,
     cache_read:$cr, cache_write_5m:$cw5,
     cache_write_1h:$cw1, fresh_input:$fi, output:$out,
     transcript_basename:$tb, source:"subagent"}')

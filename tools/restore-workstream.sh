@@ -8,6 +8,9 @@
 # Usage: bash tools/restore-workstream.sh <ws-id>
 set -u
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/config.sh"   # CC6
+
 WS_ID="${1:-}"
 if [ -z "$WS_ID" ]; then
   echo "ERROR: missing workstream id" >&2
@@ -35,7 +38,7 @@ fi
 source "$HOOKS_LIB"
 
 # Precedence (matches E4-T5/T6 pattern): BATON_ARCHIVE_DIR > OLORIN_ARCHIVE_DIR > $(archive_dir) default.
-ARCHIVE="${BATON_ARCHIVE_DIR:-${OLORIN_ARCHIVE_DIR:-$(archive_dir)}}"
+ARCHIVE="$(_cfg::get BATON_ARCHIVE_DIR "${OLORIN_ARCHIVE_DIR:-$(archive_dir)}")"
 if [ -n "${OLORIN_ARCHIVE_DIR:-}" ] && [ -z "${BATON_ARCHIVE_DIR:-}" ]; then
   echo "WARN: OLORIN_ARCHIVE_DIR is deprecated - use BATON_ARCHIVE_DIR instead." >&2
 fi
