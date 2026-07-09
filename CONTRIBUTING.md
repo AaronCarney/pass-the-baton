@@ -24,7 +24,7 @@ See [`docs/public-api.md`](docs/public-api.md) for what's stable and what's inte
 
 ## The Issue We Watch
 
-[anthropics/claude-code#18417](https://github.com/anthropics/claude-code/issues/18417) asks Anthropic for native percentage-triggered persistence. If that ships, Pass the Baton plans retirement - the wedge zeros out. We monitor this issue as the project's kill-switch trigger. PRs that hedge against this scenario (e.g., easier migration off the tool) are welcome.
+[anthropics/claude-code#18417](https://github.com/anthropics/claude-code/issues/18417) asks Anthropic for native percentage-triggered persistence. Even if it ships, it doesn't obsolete Pass the Baton: the novelty here is multi-terminal safety, terminal-bound state so concurrent Claude Code sessions (same repo or different) never overwrite each other's continuity. Native single-session persistence wouldn't cover that. We track the issue for feature overlap, not as a kill-switch.
 
 ## Tests
 
