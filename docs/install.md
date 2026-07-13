@@ -117,7 +117,7 @@ See [`docs/outcome-proxies.md`](outcome-proxies.md) for proxy definitions, the r
 
 ## Hook Coexistence
 
-Checkpoint hooks are append-only against your existing settings.json `hooks` arrays. Ordering does not affect correctness - verify by checking `$(checkpoint_dir)/hook-events.jsonl` for `event=PreToolUse` entries (the threshold-cross trigger; see `context-checkpoint.sh`) after a session crosses the 23% threshold.
+Checkpoint hooks are append-only against your existing settings.json `hooks` arrays. Ordering does not affect correctness - verify by checking `$(checkpoint_dir)/hook-events.jsonl` for `event=PreToolUse` entries (the threshold-cross trigger; see `context-checkpoint.sh`) after a session crosses the 20% threshold.
 
 ## First-time Setup
 
@@ -153,7 +153,7 @@ Where should progress files live? (BATON_PROGRESS_DIR)
 
 ```
 Where should pruned workstreams be archived? (BATON_ARCHIVE_DIR)
-  Idle >7d records move here. Recoverable via /resume.
+  Idle >7d records move here. Restore a known id with tools/restore-workstream.sh.
 ```
 
 - **Default:** `$HOME/.local/share/baton` (XDG)

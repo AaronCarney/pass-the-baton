@@ -256,6 +256,12 @@ assert '--rigor preprint: no single-transcript note' \
 bash "$SCRIPT" --transcript "$t/s.jsonl" --model claude-opus-4-7 --rigor bogus >/dev/null 2>/dev/null; rc_bogus=$?
 assert '--rigor bogus: exits non-zero' "[ \"\$rc_bogus\" -ne 0 ]"
 
+# --- Section D: shared sweep-grid single source (E5) ------------------------
+# tools/lib/sweep-grid.sh is the sole home of the 22-element threshold grid;
+# both cost-compare.sh and cost-sweep-corpus.sh consume BATON_SWEEP_THRESHOLDS.
+_g=$( source "$DIR/tools/lib/sweep-grid.sh"; printf '%s' "$BATON_SWEEP_THRESHOLDS" )
+assert "sweep-grid-values" "[ '$_g' = '10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 never' ]"
+
 rm -rf "$t" "$empty" "$e" "$b"
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

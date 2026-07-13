@@ -22,7 +22,7 @@ A session ends - context fills up, the terminal closes, something crashes - and 
 
 The handoff is built out of Claude Code hooks - small scripts that fire at points in a session's life. Here is the whole arc.
 
-As a session runs, one hook watches how full the context window is. When it crosses a threshold - 23% by default, and you can move it - it doesn't interrupt you. It quietly flags that a checkpoint is due, then waits. The next time you write your progress file, that write is what gets saved. So the checkpoint captures your latest thinking, not whatever stale state happened to be live the moment the threshold tripped.
+As a session runs, one hook watches how full the context window is. When it crosses a threshold - 20% by default, and you can move it - it doesn't interrupt you. It quietly flags that a checkpoint is due, then waits. The next time you write your progress file, that write is what gets saved. So the checkpoint captures your latest thinking, not whatever stale state happened to be live the moment the threshold tripped.
 
 That saved progress is bound to your terminal - not to the folder you are working in. This is the part that makes running more than one session at a time safe: you can have several Claude Code sessions open at once, in different repos, in the same repo, even in the same workspace, and each keeps its own separate handoff. Two sessions in the same directory never overwrite each other's state, because the binding key is the terminal, not the path.
 
@@ -92,10 +92,10 @@ Plugins update from the marketplace on demand; toggle auto-update in `/plugin` s
 
 ## Configuration
 
-The knob you'll reach for most is the trigger threshold. It resolves from three sources, highest priority first: the `BATON_PCT_THRESHOLD` environment variable, the `threshold_pct` key in `config.json` (written by the dashboard - see [Controlling your settings](#controlling-your-settings)), then the built-in default of 23. An integer from 1 to 99 is honored; anything else (non-integer, zero, negative, or 100 and up) falls back to 23.
+The knob you'll reach for most is the trigger threshold. It resolves from three sources, highest priority first: the `BATON_PCT_THRESHOLD` environment variable, the `threshold_pct` key in `config.json` (written by the dashboard - see [Controlling your settings](#controlling-your-settings)), then the built-in default of 20. An integer from 1 to 99 is honored; anything else (non-integer, zero, negative, or 100 and up) falls back to 20.
 
 ```bash
-export BATON_PCT_THRESHOLD=20   # integer percent of context window; default 23
+export BATON_PCT_THRESHOLD=20   # integer percent of context window; default 20
 ```
 
 Lower it for earlier checkpoints (more margin before auto-compact), raise it if the default feels too eager. When exported, the environment variable beats the config value and also pins the [adaptive tuner](#controlling-your-settings) so it won't auto-adjust. The hook re-reads the resolved threshold on every PreToolUse.
@@ -108,6 +108,7 @@ Other env vars you might set:
 | `BATON_OUTCOME_PROXIES` | unset | `=1` enables outcome-quality proxy emission (see [`docs/install.md` §4](docs/install.md#4-outcome-quality-proxies-opt-in)) |
 | `BATON_PREWARM` | unset | `=1` issues one max-tokens-0 API call at SessionStart to warm the prompt cache |
 | `BATON_EVENT_LOG_DISABLE` | unset | `=1` suppresses all telemetry emission |
+| `BATON_AUTO_CONTINUE` | unset | `=1` (tmux only) auto-drives `/clear` + a continue nudge into your pane after a checkpoint; clean no-op otherwise. See [`docs/configuration.md` § Auto-continue](docs/configuration.md) |
 
 Full env-var table (paths, TTLs, archive dirs): [`docs/context-baton.md` § Configuration](docs/context-baton.md#configuration-env-vars).
 
@@ -160,7 +161,7 @@ This is most people. Drop the hooks in, write a progress file when you near the 
 
 If you're running your own orchestration, the pieces are built to slot into it:
 
-- **Many workstreams at once:** because state is bound to the terminal, parallel agents and sub-agents each carry their own progress file, isolated by terminal hash. `tools/resume.sh` lists active and archived workstreams and rebinds the current terminal.
+- **Many workstreams at once:** because state is bound to the terminal, parallel agents and sub-agents each carry their own progress file, isolated by terminal hash. Reopen a session with `claude --resume` to reacquire its workstream automatically; an archived (idle) workstream can be restored with `tools/restore-workstream.sh <ws-id>`.
 - **The state model is a documented contract:** `terminals/<hash>.json` and `workstreams/<name>.json` are stable shapes (schema in [`docs/context-baton.md`](docs/context-baton.md)).
 - **Everything is `BATON_*`-overridable:** project dir, archive dir, threshold percent, TTLs - see the env-var table in [`docs/context-baton.md`](docs/context-baton.md#configuration-env-vars).
 - **Three integration patterns** for composing with an existing pipeline: drop-in, multi-workstream, pre-commit gate. See [`docs/integration-patterns.md`](docs/integration-patterns.md).
@@ -174,7 +175,7 @@ The arc described above, hook by hook:
 
 | Stage | Hook | Event | What |
 |---|---|---|---|
-| Trigger | `context-checkpoint.sh` | PreToolUse | At threshold (default 23%), flag this terminal's workstream `progress_file = "pending"` |
+| Trigger | `context-checkpoint.sh` | PreToolUse | At threshold (default 20%), flag this terminal's workstream `progress_file = "pending"` |
 | Save | `checkpoint-write-trigger.sh` | PostToolUse | When you Write/Edit a progress file with the flag set: archive prior progress, atomically update workstream record under `flock` |
 | Inject | `session-start.sh` | SessionStart | Route via `WORKSTREAM` env → terminal hash → fresh workstream; inject bound progress as MANDATORY directive |
 | Label | `project-detect.sh` | UserPromptSubmit | Detect `projects/<name>` mentions or explicit `rename this session to X`; updates the workstream's `display_name` |
@@ -228,7 +229,7 @@ Prompt and completion text are never captured by either writer; tool arguments a
 
 118 shell test suites, grouped by concern:
 
-- **Core flow:** `test-workstream-hooks.sh`, `test-restore-workstream.sh`, `test-resume.sh`, `test-prompt-sync.sh`
+- **Core flow:** `test-workstream-hooks.sh`, `test-restore-workstream.sh`, `test-prompt-sync.sh`
 - **Install / verify:** `test-install-tools.sh`, `test-installer-nfs-warn.sh`, `test-installer-post-tool-batch.sh`, `test-installer-tool-timing.sh`, `test-doctor.sh`
 - **Event log + envelope:** `test-envelope.sh`, `test-event-log-e2e.sh`, `test-hook-writers.sh`, `test-query.sh`, `test-otel-mapping.sh`, `test-logrotate-snippet.sh`, `test-tools-changed.sh`, `test-pre-warm.sh`
 - **Cost telemetry:** `test-cost.sh`, `test-cost-models.sh`, `test-cost-estimator-e2e.sh`, `test-post-tool-batch.sh`, `test-anomaly-detector.sh`, `test-tokens.sh`, `test-calibrate.sh`, `test-transcript.sh`, `test-cost-compare.sh`, `test-cost-compare-model.sh`
@@ -246,9 +247,9 @@ Prerequisites: `jq`, `flock`, GNU `grep`/`sed`. See [`.claude/hooks/tests/PREREQ
 
 ```
 .claude/hooks/    # lifecycle + telemetry hooks (trigger, save, inject, cost, sub-agent cost, latency, cleanup, detect, opt-in outcome proxies) + lib/
-.claude/skills/   # /resume, /baton, and install-baton slash commands
+.claude/skills/   # /baton (config) and install-baton slash commands (namespaced /pass-the-baton:baton under the plugin)
 lib/              # cost + token primitives (pricing, byte→token estimator, transcript reader)
-tools/            # CLIs - install, verify, resume, cleanup, query, cost, doctor, recommend, latency
+tools/            # CLIs - install, verify, cleanup, query, cost, doctor, recommend, latency
 assets/, share/   # statusline % helper; progress-file templates + logrotate config
 docs/             # reference docs - start at docs/README.md
 ```

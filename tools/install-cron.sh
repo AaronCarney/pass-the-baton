@@ -7,6 +7,9 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 
+# shellcheck source=tools/lib/cron-schedule.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib/cron-schedule.sh"
+
 DRY_RUN=0
 if [ "${1:-}" = "--dry-run" ]; then DRY_RUN=1; shift; fi
 
@@ -52,7 +55,7 @@ fi
 
 echo ""
 echo "=== Add this to your crontab (run \`crontab -e\` and paste) ==="
-echo "0 0 */2 * * $WRAPPER >> \$HOME/.cache/baton/cron.log 2>&1"
+echo "$BATON_CRON_SCHEDULE $WRAPPER >> \$HOME/.cache/baton/cron.log 2>&1"
 echo "=== End crontab snippet ==="
 echo ""
 echo "Note: the OS-cron cadence above is FIXED (every 2 days) and is INDEPENDENT of"

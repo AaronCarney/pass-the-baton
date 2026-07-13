@@ -48,7 +48,7 @@ recommend_paired::all_pairs() {
       local pc_out
       pc_out=$(bash "$_RPAD_REPO/tools/paired-compare.sh" \
         --arm-a "$fa" --arm-b "$fb" --key slug --json --subset clean \
-        --seed "${SEED:-42}" 2>/dev/null)
+        --seed "${SEED:-${STATS_DEFAULT_SEED:-42}}" 2>/dev/null)
 
       # Extract .clean block (already the consumer-facing shape).
       # On zero-overlap, paired-compare.sh emits {error:"..."} with no .clean key.

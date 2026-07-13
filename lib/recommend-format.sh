@@ -44,7 +44,7 @@ recommend::format() {
   post_e16_days=$(printf '%s' "$agg" | jq -r '.window.post_e16_days // 0')
 
   if [[ "$outcome_insufficient" == "true" ]]; then
-    local days_needed=$(( 30 - post_e16_days ))
+    local days_needed=$(( ${BATON_OUTCOME_WINDOW_DAYS:-30} - post_e16_days ))
     printf 'Outcome-quality recommendation: insufficient data; %s more days needed.\n' "$days_needed"
   else
     printf 'Outcome-quality method: %s.\n' "${outcome_winner:-unknown}"
@@ -54,7 +54,7 @@ recommend::format() {
   local argmax
   argmax=$(printf '%s' "$agg" | jq -r '.threshold_sweep.argmax // empty')
   if [[ -n "$argmax" ]] && [[ "$argmax" != "null" ]]; then
-    printf 'Recommended BATON_PCT_THRESHOLD: %s (current default: 23).\n' "$argmax"
+    printf 'Recommended BATON_PCT_THRESHOLD: %s (current default: %s).\n' "$argmax" "${BATON_DEFAULT_PCT_THRESHOLD:-20}"
   fi
 
   # Caveats

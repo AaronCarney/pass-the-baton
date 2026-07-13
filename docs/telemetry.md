@@ -19,7 +19,7 @@ This document is the single source of truth for the envelope, field names, redac
 Every line is a complete JSON value. No multi-line records, no leading/trailing whitespace, one event per line. Frozen shape:
 
 ```json
-{"schema_version":1,"event":"PreToolUse","ts":"2026-05-16T23:54:07Z","data":{"tool_name":"Read","context_pct":22,"threshold":23,"pending_set":false}}
+{"schema_version":1,"event":"PreToolUse","ts":"2026-05-16T23:54:07Z","data":{"tool_name":"Read","context_pct":18,"threshold":20,"pending_set":false}}
 ```
 
 Fields:
@@ -45,7 +45,7 @@ Emitted by `.claude/hooks/context-checkpoint.sh` on every PreToolUse hook fire.
 |---|---|---|
 | `tool_name` | string | Tool that is about to fire (`Bash`, `Edit`, `Write`, …). |
 | `context_pct` | integer | Approximate context-fill percentage from the statusline at trigger time. `0` if the statusline file is missing. |
-| `threshold` | integer | The configured checkpoint threshold (default `23`). |
+| `threshold` | integer | The configured checkpoint threshold (default `20`). |
 | `pending_set` | boolean | `true` if this PreToolUse just set the deferred-save flag (i.e., the checkpoint was triggered on this call). At most one `pending_set=true` event per session per checkpoint cycle. |
 
 ### `PostToolUse` - checkpoint cleanup only
@@ -109,7 +109,7 @@ Emitted by `.claude/hooks/post-tool-batch.sh` on every PostToolBatch hook fire, 
 | `fresh_input` | integer | Uncached input tokens. |
 | `output` | integer | Output tokens. |
 | `turn_index` | integer | Count of assistant messages observed in the trailing 50 transcript lines. |
-| `threshold` | integer | The checkpoint threshold in effect for this turn, via `checkpoint_threshold` (env > config > default 23). Lets cost be correlated to the threshold setting. |
+| `threshold` | integer | The checkpoint threshold in effect for this turn, via `checkpoint_threshold` (env > config > default 20). Lets cost be correlated to the threshold setting. |
 | `summary_turn` | boolean | `true` on the first turn after a `/clear` (detected by `turn_index` dropping). Marks the re-prime turn; its output tokens feed the summary-tokens running mean (see [cost-model](cost-model.md)). |
 | `transcript_basename` | string | Basename of the transcript file. |
 

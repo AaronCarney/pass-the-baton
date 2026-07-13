@@ -28,6 +28,10 @@ if ! declare -F _cfg::get >/dev/null 2>&1; then
   }
 fi
 
+# E5 single-source constants (idempotent :=, re-source-safe).
+: "${_WS_CLOCK_GRACE_SECONDS:=86400}"   # 24h clock-skew grace for ISO8601 parse windows
+: "${_BATON_DEBUG_LOG_MAX_BYTES:=102400}"  # 100KB debug-log truncation cap (shared by cleanup paths)
+
 # Append a structured JSONL event to the persistent hook audit log.
 # Keeps a forensic trail of selection outcomes, warnings, and sticky writes -
 # survives WSL shutdowns (unlike /tmp debug log). Gitignored.
@@ -103,7 +107,9 @@ checkpoint_threshold() {
   # an integer in 1..99 is honored; anything else falls back to the default.
   # Both the gate (context-checkpoint.sh) and the PreToolUse telemetry field read
   # through here, so the trigger and the reported `threshold` are always equal.
-  local _def=23 _t
+  # _def is the compiled default; ${BATON_DEFAULT_PCT_THRESHOLD:-20} is a FAITHFUL
+  # fallback (bound to the lib/config.sh constant) for the guard-source-failed case.
+  local _def="${BATON_DEFAULT_PCT_THRESHOLD:-20}" _t
   _t="$(_cfg::get BATON_PCT_THRESHOLD "$_def" threshold_pct)"
   if [[ "$_t" =~ ^[0-9]+$ ]] && [ "$_t" -ge 1 ] && [ "$_t" -le 99 ]; then
     printf '%s' "$_t"
@@ -149,6 +155,10 @@ tmp_ttl_minutes() {
   local h; h="$(_cfg::get BATON_TMP_TTL_HOURS 24)"
   echo $((h * 60))
 }
+
+# Sweep self-throttle interval (hours). Single source for the BATON_SWEEP_INTERVAL_HOURS
+# default; NOT the OS-cron cadence (that is BATON_CRON_SCHEDULE in tools/lib/cron-schedule.sh).
+sweep_interval_hours() { _cfg::get BATON_SWEEP_INTERVAL_HOURS 48; }
 
 # (sticky helpers removed in v2 - see the checkpoint-system design (maintained internally))
 
@@ -237,7 +247,7 @@ parse_iso8601() {
   local ts="$1"
   local now epoch
   now=$(date -u +%s)
-  local fallback=$((now - $(workstream_ttl_seconds) + 86400))
+  local fallback=$((now - $(workstream_ttl_seconds) + _WS_CLOCK_GRACE_SECONDS))
 
   if [ -z "$ts" ]; then
     log_event "${CLAUDE_PROJECT_DIR:-$PWD}" workstream-lib parse_iso8601-fallback "reason=empty" 2>/dev/null
@@ -253,7 +263,7 @@ parse_iso8601() {
   fi
 
   # Future-of-day check: more than 24h ahead of now → treat as malformed.
-  if [ "$epoch" -gt $((now + 86400)) ]; then
+  if [ "$epoch" -gt $((now + _WS_CLOCK_GRACE_SECONDS)) ]; then
     log_event "${CLAUDE_PROJECT_DIR:-$PWD}" workstream-lib parse_iso8601-fallback "reason=future" "input=$ts" 2>/dev/null
     echo "$fallback"
     return 0
@@ -280,7 +290,7 @@ atomic_write() {
 # rebind_terminal <tracking_dir> <ws> - point THIS terminal (term_hash) at <ws>.
 # Atomically rewrites terminals/<hash>.json, the v2 source of truth the checkpoint
 # WRITE path re-reads each fire. Sole binding-writer outside session-start; shared
-# by tools/resume.sh and project-detect.sh so the two can never diverge.
+# by project-detect.sh so the two can never diverge.
 rebind_terminal() {
   local tracking="$1" ws="$2"
   local th ts now
@@ -291,6 +301,31 @@ rebind_terminal() {
   jq -n --arg tid "$ts" --arg ws "$ws" --arg now "$now" \
     '{terminal_id:$tid, workstream:$ws, updated_at:$now}' \
     | atomic_write "$tracking/terminals/${th}.json"
+}
+
+# find_workstream_by_session_id <tracking_dir> <session_id> - crash-recovery
+# reverse lookup. Echoes the workstream id of the record whose additive
+# .session_id equals <session_id>; on multiple matches the most-recently-updated
+# (updated_at) wins. Empty session_id or no match -> no output, return 1.
+# Records predating the additive session_id field never match (`.session_id //
+# empty`). Consulted only on a terminals/<hash>.json miss (session-start routing).
+find_workstream_by_session_id() {
+  local tracking="$1" sid="$2"
+  [ -n "$sid" ] || return 1
+  local best="" best_epoch=-1 f
+  for f in "$tracking/workstreams"/*.json; do
+    [ -f "$f" ] || continue
+    local f_sid; f_sid=$(jq -r '.session_id // empty' "$f" 2>/dev/null)
+    [ "$f_sid" = "$sid" ] || continue
+    local f_ws; f_ws=$(jq -r '.workstream // empty' "$f" 2>/dev/null)
+    [ -n "$f_ws" ] || continue
+    local f_epoch; f_epoch=$(parse_iso8601 "$(jq -r '.updated_at // empty' "$f" 2>/dev/null)")
+    if [ "$f_epoch" -gt "$best_epoch" ]; then
+      best_epoch="$f_epoch"; best="$f_ws"
+    fi
+  done
+  [ -n "$best" ] || return 1
+  printf '%s' "$best"
 }
 
 # workstream_in_use <tracking_dir> <ws_id> - exit 0 if any *fresh* terminals/<hash>.json

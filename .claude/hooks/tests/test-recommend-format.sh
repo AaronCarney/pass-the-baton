@@ -145,6 +145,11 @@ printf '%s' "$human" | grep -q 'BATON_PCT_THRESHOLD' \
   && _pass "(e) BATON_PCT_THRESHOLD and 34 present" \
   || _fail "(e) BATON_PCT_THRESHOLD/34 missing; got: $human"
 
+# (e2) current-default display single-sources to the constant fallback (20, not 23).
+printf '%s' "$human" | grep -q 'current default: 20' \
+  && _pass "(e2) current default 20 present" \
+  || _fail "(e2) 'current default: 20' missing; got: $human"
+
 # (f) crossing's model-id
 printf '%s' "$human" | grep -q 'claude-sonnet-4-6' \
   && _pass "(f) crossing model-id 'claude-sonnet-4-6' present" \

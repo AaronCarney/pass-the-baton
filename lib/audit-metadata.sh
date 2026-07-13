@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Pure helpers - do not exec on source.
 
+: "${_AUDIT_STALE_DAYS:=90}"   # audit considered stale after N days
+
 audit_metadata::_path() {
   printf '%s\n' "${BATON_AUDIT_METADATA:-${PWD}/.baton/audit-metadata.json}"
 }
@@ -49,5 +51,5 @@ audit_metadata::is_stale() {
   audit_epoch=$(date -u -d "$audit_date" +%s 2>/dev/null) || return 0
   now_epoch=$(date -u +%s)
   days_diff=$(( (now_epoch - audit_epoch) / 86400 ))
-  [ "$days_diff" -gt 90 ] && return 0 || return 1
+  [ "$days_diff" -gt "$_AUDIT_STALE_DAYS" ] && return 0 || return 1
 }

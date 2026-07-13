@@ -106,7 +106,7 @@ P2_TEXT='Where should progress files live? (BATON_PROGRESS_DIR)
 P2_DEFAULT="$P1_DEFAULT/progress"
 
 P3_TEXT='Where should pruned workstreams be archived? (BATON_ARCHIVE_DIR)
-  Idle >7d records move here. Recoverable via /resume.'
+  Idle >7d records move here. Restore a known id with tools/restore-workstream.sh.'
 P3_DEFAULT="$HOME/.local/share/baton"
 
 P4_TEXT='What is the project root cron should operate on? (BATON_PROJECT_DIR)
@@ -156,6 +156,19 @@ if [ ! -f "$SHIM_DEST" ]; then
   cp "$SHIM_SRC" "$SHIM_DEST"
   chmod +x "$SHIM_DEST"
 fi
+
+# 4b. Install project-local skills (Claude Code discovers skills only by
+# scanning a project .claude/skills/ dir - hook wiring in settings.json is not
+# enough to yield slash commands). Copy the kept skills into the target.
+SKILLS_DEST="$TARGET/.claude/skills"
+mkdir -p "$SKILLS_DEST"
+for _skill in baton install-baton; do
+  if [ -d "$REPO_DIR/.claude/skills/$_skill" ] && [ ! -e "$SKILLS_DEST/$_skill" ]; then
+    cp -R "$REPO_DIR/.claude/skills/$_skill" "$SKILLS_DEST/$_skill"
+    echo "OK: installed skill $_skill -> $SKILLS_DEST/$_skill"
+  fi
+done
+unset _skill
 
 # 5. Merge settings.json.
 mkdir -p "$(dirname "$SETTINGS")"

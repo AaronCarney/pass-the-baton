@@ -18,6 +18,8 @@
 #     IFS=$'\t' read -r cache_read cache_write_5m cache_write_1h \
 #       fresh_input output < <(usage_tokens::extract "$usage_json")
 
+: "${_TRANSCRIPT_SCAN_LINES:=50}"   # transcript tail window (lines) scanned for usage/model/turn
+
 usage_tokens::extract() {
   local usage_json="$1"
   local cache_read cache_write_5m cache_write_1h fresh_input output

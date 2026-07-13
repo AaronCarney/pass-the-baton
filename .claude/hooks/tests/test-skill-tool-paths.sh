@@ -51,7 +51,7 @@ assert "no SKILL.md invokes a tool via \$CLAUDE_PROJECT_DIR with no \${CLAUDE_PL
 
 # The runtime skills that drive a bundled CLI must route through
 # ${CLAUDE_PLUGIN_ROOT} so they resolve inside the plugin cache.
-for s in resume baton; do
+for s in baton; do
   f="$SKILLS_DIR/$s/SKILL.md"
   assert "$s skill exists" "[ -f '$f' ]"
   assert "$s skill routes its tool through \${CLAUDE_PLUGIN_ROOT}" \
@@ -63,7 +63,7 @@ done
 # a bare "$PROJECT_DIR/.claude/hooks/lib" or "$PROJECT_DIR/tools" base breaks for
 # plugin users (where $PROJECT_DIR is the consumer project, not the plugin root).
 TOOLS_DIR="$ROOT/tools"
-for t in resume restore-workstream; do
+for t in restore-workstream; do
   f="$TOOLS_DIR/$t.sh"
   assert "$t.sh exists" "[ -f '$f' ]"
   assert "$t.sh self-locates via BASH_SOURCE" \
@@ -73,10 +73,6 @@ for t in resume restore-workstream; do
   assert "$t.sh resolves hooks-lib relative to SCRIPT_DIR" \
     "grep -qE 'SCRIPT_DIR[^\"]*\\.claude/hooks/lib' '$f'"
 done
-# resume.sh must NOT invoke its sibling restore tool via a bare \$PROJECT_DIR
-# base with no SCRIPT_DIR fallback on a reachable line.
-assert "resume.sh self-locates the restore-workstream sibling" \
-  "grep -qE 'SCRIPT_DIR/restore-workstream\\.sh' '$TOOLS_DIR/resume.sh'"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

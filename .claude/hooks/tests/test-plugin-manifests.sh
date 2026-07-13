@@ -56,7 +56,7 @@ assert "marketplace.json plugins[0].source == ./ (relative self-source)" \
   "[ \"\$(jq -r '.plugins[0].source' '$MARKET')\" = './' ]"
 
 # ---- shipped skills carry frontmatter name: ----
-for s in baton install-baton resume; do
+for s in baton install-baton; do
   assert "skill $s has frontmatter name:" \
     "grep -qE '^name: *[a-z-]+' '$ROOT/.claude/skills/$s/SKILL.md'"
 done

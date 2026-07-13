@@ -489,6 +489,19 @@ run_arc_disable() {
 }
 run_arc_disable
 
+# ----- Group G: named caps -----
+echo
+echo "## named-caps"
+
+run_named_caps() {
+  local _m _p
+  _m=$( source "$LIB"; printf '%s' "$_MAX_EVENT_BYTES" )
+  _p=$( source "$LIB"; printf '%s' "$_PIPE_BUF_BYTES" )
+  assert "envelope-max-4096" "[ '$_m' = '4096' ]"
+  assert "envelope-pipebuf-512" "[ '$_p' = '512' ]"
+}
+run_named_caps
+
 echo
 echo "====================================="
 echo "Results: $PASS passed, $FAIL failed"

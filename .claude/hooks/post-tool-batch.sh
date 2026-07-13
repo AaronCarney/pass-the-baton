@@ -10,6 +10,8 @@ source "$HOOKS_DIR/lib/envelope.sh"
 # shellcheck source=lib/usage-tokens.sh
 source "$HOOKS_DIR/lib/usage-tokens.sh"
 
+: "${_CACHE_ANOMALY_MULT:=2}"   # creation-count spike ratio that flags a cache anomaly
+
 # Path computation matches the existing hook pattern (e.g., .claude/hooks/anomaly-detector.sh).
 _hook_dir="${BASH_SOURCE[0]%/*}"
 _repo_root="$(cd "$_hook_dir/../.." && pwd -P)"
@@ -34,13 +36,13 @@ transcript_path=$(printf '%s' "$payload" | jq -r '.transcript_path // ""')
 [ ! -f "$transcript_path" ] && exit 0
 
 # --- extract last assistant usage block --------------------------------------
-usage_json=$(tail -n 50 "$transcript_path" \
+usage_json=$(tail -n "$_TRANSCRIPT_SCAN_LINES" "$transcript_path" \
   | jq -s '[.[] | select(.message.role=="assistant") | .message.usage] | last' 2>/dev/null)
 
 [ -z "$usage_json" ] || [ "$usage_json" = "null" ] && exit 0
 
 # Extract model from last assistant message.
-model=$(tail -n 50 "$transcript_path" \
+model=$(tail -n "$_TRANSCRIPT_SCAN_LINES" "$transcript_path" \
   | jq -rs '[.[] | select(.message.role=="assistant") | .message.model] | last // ""' 2>/dev/null)
 
 # --- parse token fields -------------------------------------------------------
@@ -64,7 +66,7 @@ current_creation=$(printf '%s' "$usage_json" | jq -r '
 transcript_basename=$(basename "$transcript_path")
 
 # --- determine turn_index (count of assistant messages seen) -----------------
-turn_index=$(tail -n 50 "$transcript_path" \
+turn_index=$(tail -n "$_TRANSCRIPT_SCAN_LINES" "$transcript_path" \
   | jq -s '[.[] | select(.message.role=="assistant")] | length' 2>/dev/null || echo 0)
 
 # --- /clear sentinel + summary_turn detection --------------------------------
@@ -145,7 +147,7 @@ chmod 0600 "$state_file" 2>/dev/null || true
   prior_creation=$(jq -r --arg sid "$session_id" '.[$sid] // 0' "$state_file" 2>/dev/null || echo 0)
   prior_creation=${prior_creation:-0}
 
-  if [ "$prior_creation" -gt 0 ] && [ "$current_creation" -ge $((prior_creation * 2)) ]; then
+  if [ "$prior_creation" -gt 0 ] && [ "$current_creation" -ge $((prior_creation * _CACHE_ANOMALY_MULT)) ]; then
     ratio=$(jq -cn --argjson c "$current_creation" --argjson p "$prior_creation" '$c / $p')
     anomaly_json=$(jq -cn \
       --arg session_id "$session_id" \

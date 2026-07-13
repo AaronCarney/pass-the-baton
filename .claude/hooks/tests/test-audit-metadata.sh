@@ -55,6 +55,10 @@ printf '{"audit_date":"%s"}\n' "$OLD" > "$FIXTURE2/.baton/audit-metadata.json"
 rc=0; audit_metadata::is_stale || rc=$?
 assert 'old audit → rc=0 (stale)' "[ $rc -eq 0 ]"
 
+# === Cycle 4: staleness cutoff is a named constant ===
+_c=$( source "$REPO_ROOT/lib/audit-metadata.sh"; printf '%s' "$_AUDIT_STALE_DAYS" )
+assert "audit-stale-days-90" "[ '$_c' = '90' ]"
+
 # Cleanup
 rm -rf "$FIXTURE" "$FIXTURE2"
 unset BATON_AUDIT_METADATA

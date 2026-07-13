@@ -40,7 +40,7 @@ where `N = 30 − post_e16_days`. The word "insufficient data" appears in the ou
 
 ### Recommended BATON_PCT_THRESHOLD
 
-Threshold sweep result: the value of `BATON_PCT_THRESHOLD` that minimizes median session cost. Sweep baseline is 22; savings are reported relative to that baseline. The current shipped default is 23.
+Threshold sweep result: the value of `BATON_PCT_THRESHOLD` that minimizes median session cost. Sweep baseline is 22; savings are reported relative to that baseline. The current shipped default is 20.
 
 ### Paired deltas
 

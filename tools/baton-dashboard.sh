@@ -3,7 +3,7 @@
 # Usage:
 #   baton-dashboard.sh show
 #   baton-dashboard.sh set key=value [key2=value2 ...]
-#   baton-dashboard.sh  (interactive - currently identical to `show`)
+#   baton-dashboard.sh  (no args: same as `show`)
 
 set -u
 
@@ -16,53 +16,65 @@ mkdir -p "$CFG_DIR"
 # shellcheck source=../lib/config.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/config.sh"
 
+# TTL default helpers (workstream_ttl_seconds/tracking_ttl_seconds/tmp_ttl_minutes)
+# so the dashboard shows the SAME defaults the cron sweep actually uses.
+# shellcheck source=../.claude/hooks/lib/workstream-lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/.claude/hooks/lib/workstream-lib.sh"
+
 KNOWN_TEMPLATES="free task factory"
+
+# Bracketed effective-source tag for a key row: [env]|[config]|[default].
+_src() { printf '[%s]' "$(_cfg::source "$1" "${2:-$1}")"; }
 
 _show() {
   local template tv
-  template=$(_cfg::get template free)
+  template=$(jq -r '.template // "free"' "$CFG" 2>/dev/null)
   tv=$(jq -r --arg t "$template" '.per_template[$t].template_version // 1' "$CFG")
   echo "baton config ($CFG)"
   printf '\n[Existing]\n'
-  printf '  %-32s %s\n' 'template:'              "$template"
-  printf '  %-32s %s\n' 'threshold_pct:'         "$(_cfg::get BATON_PCT_THRESHOLD 23 threshold_pct)"
-  printf '  %-32s %s\n' 'display_name:'          "$(_cfg::get BATON_DISPLAY_NAME '' display_name)"
-  printf '  %-32s %s\n' 'templates_dir:'         "$(_cfg::get BATON_TEMPLATES_DIR '' templates_dir)"
-  printf '  %-32s %s\n' 'project_context_file:'  "$(_cfg::get BATON_PROJECT_CONTEXT_FILE '' project_context_file)"
+  printf '  %-32s %-40s %s\n' 'template:'              "$template" '[config-only]'
+  printf '  %-32s %-40s %s\n' 'threshold_pct:'         "$(_cfg::get BATON_PCT_THRESHOLD "$BATON_DEFAULT_PCT_THRESHOLD" threshold_pct)" "$(_src BATON_PCT_THRESHOLD threshold_pct)"
+  printf '  %-32s %-40s %s\n' 'display_name:'          "$(_cfg::get BATON_DISPLAY_NAME '' display_name)" "$(_src BATON_DISPLAY_NAME display_name)"
+  printf '  %-32s %-40s %s\n' 'templates_dir:'         "$(jq -r '.templates_dir // empty' "$CFG" 2>/dev/null)" '[config-only]'
+  printf '  %-32s %-40s %s\n' 'project_context_file:'  "$(jq -r '.project_context_file // empty' "$CFG" 2>/dev/null)" '[config-only]'
   printf '\n[Paths]\n'
-  printf '  %-32s %s\n' 'BATON_DIR:'           "$(_cfg::get BATON_DIR "$PWD/.baton")"
-  printf '  %-32s %s\n' 'BATON_PROGRESS_DIR:'  "$(_cfg::get BATON_PROGRESS_DIR "$PWD/.baton/progress")"
-  printf '  %-32s %s\n' 'BATON_ARCHIVE_DIR:'   "$(_cfg::get BATON_ARCHIVE_DIR "$HOME/.local/share/baton")"
-  printf '  %-32s %s\n' 'BATON_PROJECT_DIR:'   "$(_cfg::get BATON_PROJECT_DIR "$PWD")"
+  printf '  %-32s %-40s %s\n' 'BATON_DIR:'           "$(_cfg::get BATON_DIR "$PWD/.baton")" '[env-only by design]'
+  printf '  %-32s %-40s %s\n' 'BATON_PROGRESS_DIR:'  "$(_cfg::get BATON_PROGRESS_DIR "$PWD/.baton/progress")" "$(_src BATON_PROGRESS_DIR)"
+  printf '  %-32s %-40s %s\n' 'BATON_ARCHIVE_DIR:'   "$(_cfg::get BATON_ARCHIVE_DIR "$HOME/.local/share/baton")" "$(_src BATON_ARCHIVE_DIR)"
+  printf '  %-32s %-40s %s\n' 'BATON_PROJECT_DIR:'   "$(_cfg::get BATON_PROJECT_DIR "$PWD")" '[env-only by design]'
   printf '\n[TTLs]\n'
-  printf '  %-32s %s\n' 'BATON_WORKSTREAM_TTL_DAYS:' "$(_cfg::get BATON_WORKSTREAM_TTL_DAYS 30)"
-  printf '  %-32s %s\n' 'BATON_TRACKING_TTL_DAYS:'   "$(_cfg::get BATON_TRACKING_TTL_DAYS 7)"
-  printf '  %-32s %s\n' 'BATON_TMP_TTL_HOURS:'       "$(_cfg::get BATON_TMP_TTL_HOURS 24)"
+  printf '  %-32s %-40s %s\n' 'BATON_WORKSTREAM_TTL_DAYS:' "$(( $(workstream_ttl_seconds) / 86400 ))" "$(_src BATON_WORKSTREAM_TTL_DAYS)"
+  printf '  %-32s %-40s %s\n' 'BATON_TRACKING_TTL_DAYS:'   "$(( $(tracking_ttl_seconds) / 86400 ))" "$(_src BATON_TRACKING_TTL_DAYS)"
+  printf '  %-32s %-40s %s\n' 'BATON_TMP_TTL_HOURS:'       "$(( $(tmp_ttl_minutes) / 60 ))" "$(_src BATON_TMP_TTL_HOURS)"
   printf '\n[Opt-ins]\n'
-  printf '  %-32s %s\n' 'BATON_COLLECT:'            "$(_cfg::get BATON_COLLECT 0)"
-  printf '  %-32s %s\n' 'BATON_TIMING:'             "$(_cfg::get BATON_TIMING 0)"
-  printf '  %-32s %s\n' 'BATON_OUTCOME_PROXIES:'    "$(_cfg::get BATON_OUTCOME_PROXIES 0)"
-  printf '  %-32s %s\n' 'BATON_PREWARM:'            "$(_cfg::get BATON_PREWARM 0)"
-  printf '  %-32s %s\n' 'BATON_EVENT_LOG_DISABLE:'  "$(_cfg::get BATON_EVENT_LOG_DISABLE 0)"
+  printf '  %-32s %-40s %s\n' 'BATON_COLLECT:'            "$(_cfg::get BATON_COLLECT 0)" "$(_src BATON_COLLECT)"
+  printf '  %-32s %-40s %s\n' 'BATON_TIMING:'             "$(_cfg::get BATON_TIMING 0)" "$(_src BATON_TIMING)"
+  printf '  %-32s %-40s %s\n' 'BATON_OUTCOME_PROXIES:'    "$(_cfg::get BATON_OUTCOME_PROXIES 0)" "$(_src BATON_OUTCOME_PROXIES)"
+  printf '  %-32s %-40s %s\n' 'BATON_PREWARM:'            "$(_cfg::get BATON_PREWARM 0)" "$(_src BATON_PREWARM)"
+  printf '  %-32s %-40s %s\n' 'BATON_EVENT_LOG_DISABLE:'  "$(_cfg::get BATON_EVENT_LOG_DISABLE 0)" "$(_src BATON_EVENT_LOG_DISABLE)"
   printf '\n[Event-log]\n'
-  printf '  %-32s %s\n' 'BATON_EVENT_LOG:'      "$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")"
-  printf '  %-32s %s\n' 'BATON_OTEL_EXPORT:'    "$(_cfg::get BATON_OTEL_EXPORT '')"
+  printf '  %-32s %-40s %s\n' 'BATON_EVENT_LOG:'      "$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")" "$(_src BATON_EVENT_LOG)"
+  printf '  %-32s %-40s %s\n' 'BATON_OTEL_EXPORT:'    "$(_cfg::get BATON_OTEL_EXPORT '')" "$(_src BATON_OTEL_EXPORT)"
   printf '\n[Cost-model]\n'
-  printf '  %-32s %s\n' 'BATON_COST_MODEL:'     "$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)"
-  printf '  %-32s %s\n' 'BATON_SUMMARY_MODEL:'  "$(_cfg::get BATON_SUMMARY_MODEL '')"
-  printf '  %-32s %s\n' 'BATON_TOKEN_RATIOS:'   "$(_cfg::get BATON_TOKEN_RATIOS "$HOME/.config/baton/token-ratios.sh")"
+  printf '  %-32s %-40s %s\n' 'BATON_COST_MODEL:'     "$(_cfg::get BATON_COST_MODEL claude-sonnet-4-6)" "$(_src BATON_COST_MODEL)"
+  printf '  %-32s %-40s %s\n' 'BATON_SUMMARY_MODEL:'  "$(_cfg::get BATON_SUMMARY_MODEL '')" "$(_src BATON_SUMMARY_MODEL)"
+  printf '  %-32s %-40s %s\n' 'BATON_TOKEN_RATIOS:'   "$(_cfg::get BATON_TOKEN_RATIOS "$HOME/.config/baton/token-ratios.sh")" "$(_src BATON_TOKEN_RATIOS)"
   printf '\n[Statusline]\n'
-  printf '  %-32s %s\n' 'BATON_STATUSLINE_COLOR_MODE:' "$(_cfg::get BATON_STATUSLINE_COLOR_MODE off)"
+  printf '  %-32s %-40s %s\n' 'BATON_STATUSLINE_COLOR_MODE:' "$(_cfg::get BATON_STATUSLINE_COLOR_MODE off)" "$(_src BATON_STATUSLINE_COLOR_MODE)"
   printf '\nActive template (%s):\n' "$template"
   printf '  %-32s %s\n' 'template_version:' "$tv"
-  printf '\nNote: keys read through _cfg::get honor env var > config.json > default.\n'
-  printf 'The _cfg::get migration is partial -- some BATON_* vars are still read\n'
-  printf 'env-only by certain tools (e.g. query.sh/cost.sh/latency.sh read BATON_EVENT_LOG\n'
-  printf 'from the env), and BATON_DIR/BATON_PROJECT_DIR stay env-only by design.\n'
-  printf 'Export the env var when you need a value to take effect everywhere.\n'
-  printf 'threshold_pct moves the actual checkpoint trigger (env BATON_PCT_THRESHOLD or this\n'
-  printf 'config value; bounds 1-99, else the default 23), and the telemetry threshold field\n'
-  printf 'reports the same value.\n'
+  printf '\nSource tag per row reflects how the actual runtime consumer reads the key:\n'
+  printf '  [env]/[config]/[default]  the consumer routes through _cfg::get, precedence\n'
+  printf '     env var > config.json > default; the tag names the layer in effect now.\n'
+  printf '  [config-only]  the consumer reads config.json directly and ignores the env\n'
+  printf '     var (template, templates_dir, project_context_file); set it via this\n'
+  printf '     dashboard, exporting the env var has no runtime effect.\n'
+  printf '  [env-only by design]  BATON_DIR/BATON_PROJECT_DIR locate the state dir before\n'
+  printf '     config is read; setting them here has no effect, export the env var.\n'
+  printf 'For an [env]-tagged key a dashboard set writes config.json but will not take\n'
+  printf 'until you unset the shadowing env var. threshold_pct moves the actual checkpoint\n'
+  printf 'trigger (bounds 1-99, else %s) and is reported unchanged in the telemetry\n' "$BATON_DEFAULT_PCT_THRESHOLD"
+  printf 'threshold field.\n'
 }
 
 _set_one() {

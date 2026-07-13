@@ -6,6 +6,7 @@ set -u
 
 _AGV2_ARMS_RE='^(compact|auto-memory|clear-only|none)$'
 _AGV2_SUBSETS_RE='^(clean|fired)$'
+: "${_L0_SAMPLE_FLOOR:=0.30}"   # L0 headline bound-only below this share (B11)
 
 # aggregator_v2::per_arm_per_subset_block <arm> <subset> <usd_total> <session_count>
 #   Emits a compact JSON object (no trailing newline from jq -c).
@@ -53,11 +54,12 @@ aggregator_v2::subset_size_warning() {
     echo "aggregator_v2: clean_share out of [0,1] (got: $share)" >&2
     return 1
   fi
-  local below; below=$(LC_ALL=C awk -v s="$share" 'BEGIN{ print (s < 0.30) ? 1 : 0 }')
+  local below; below=$(LC_ALL=C awk -v s="$share" 'BEGIN{ print (s < '"$_L0_SAMPLE_FLOOR"') ? 1 : 0 }')
   if [ "$below" -eq 0 ]; then
     printf '%s' 'null'
     return 0
   fi
   local pct; pct=$(LC_ALL=C awk -v s="$share" 'BEGIN{ printf "%.1f", s*100 }')
-  jq -cn --arg s "Clean subset is $pct% of total sessions; below 30% L0 sample-size floor - headline is bound-only per B11." '$s'
+  local _floor_pct; _floor_pct=$(LC_ALL=C awk -v f="$_L0_SAMPLE_FLOOR" 'BEGIN{printf "%d", f*100}')
+  jq -cn --arg s "Clean subset is $pct% of total sessions; below ${_floor_pct}% L0 sample-size floor - headline is bound-only per B11." '$s'
 }

@@ -70,7 +70,7 @@ if [ "$IF_DUE" = "1" ]; then
     exit 0
   fi
   flock -n 9 || { log "sweep: in progress, skip"; exit 0; }
-  SWEEP_INTERVAL_HOURS=${BATON_SWEEP_INTERVAL_HOURS:-48}
+  SWEEP_INTERVAL_HOURS=$(sweep_interval_hours)
   if [ -f "$TRACKING/.cron-last-run" ] && \
      [ -n "$(find "$TRACKING" -maxdepth 1 -name .cron-last-run -mmin -"$((SWEEP_INTERVAL_HOURS*60))" 2>/dev/null)" ]; then
     log "sweep: not due (interval=${SWEEP_INTERVAL_HOURS}h)"
@@ -164,7 +164,7 @@ log "Block 6: refreshed $CD/.cron-last-run"
 DEBUG_LOG="/tmp/claude-ws-debug.log"
 if [ -f "$DEBUG_LOG" ]; then
   SIZE=$(stat -c %s "$DEBUG_LOG" 2>/dev/null || echo 0)
-  if [ "$SIZE" -gt 102400 ]; then
+  if [ "$SIZE" -gt "${_BATON_DEBUG_LOG_MAX_BYTES:-102400}" ]; then
     tail -50 "$DEBUG_LOG" > "${DEBUG_LOG}.tmp" && mv "${DEBUG_LOG}.tmp" "$DEBUG_LOG"
   fi
   log "Block 7: debug log: ${SIZE} bytes"

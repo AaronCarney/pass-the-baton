@@ -42,13 +42,15 @@ source "$_SD/lib/audit-metadata.sh"
 source "$_SD/lib/gamma-bands.sh"
 # shellcheck source=/dev/null
 source "$_SD/lib/config.sh"   # CC6
+# shellcheck source=/dev/null
+source "$_SD/tools/lib/sweep-grid.sh"   # E5: shared threshold-sweep grid
 
 DISCLAIMER="Token counts are an estimate computed from content size and Anthropic's published per-model tokenizer behavior. Actual API billing uses Anthropic's authoritative count, which may differ by up to ~5% on prose and up to ~35% on code or structured text for Opus 4.7. For a billing-grade figure, use \`bash tools/cost.sh --verify --corpus DIR\`."
 
 METHOD="baton-threshold"
 SCHEMA_VERSION=3
 
-THRESHOLDS=(10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 never)
+read -r -a THRESHOLDS <<< "$BATON_SWEEP_THRESHOLDS"
 
 usage() {
   cat <<EOF

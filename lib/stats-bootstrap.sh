@@ -2,6 +2,7 @@
 # lib/stats-bootstrap.sh - bootstrap CI engine (bash API, Python compute tier).
 # Subcommands: bca | studentized | block | block-length-auto
 set -uo pipefail
+: "${STATS_DEFAULT_SEED:=42}"   # default RNG seed for reproducible bootstrap resampling (callers' default; the lib itself omits --seed unless SEED is set)
 _SD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _REPO="$(cd "$_SD/.." && pwd)"
 _PY="$_REPO/tools/_stats_bootstrap.py"

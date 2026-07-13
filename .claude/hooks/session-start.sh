@@ -42,6 +42,9 @@ if ! declare -F _cfg::get >/dev/null 2>&1; then
   }
 fi
 
+: "${_MISSED_SWEEP_MULT:=2}"          # warn after this many missed sweeps
+: "${_PREWARM_MIN_SYS_BYTES:=4096}"   # min system-prompt file size to prewarm cache
+
 # Emit SessionStart envelope exactly once on EXIT (CC2). Failures go to stderr,
 # never alter the hook exit code.
 _SS_WS=""
@@ -104,8 +107,8 @@ if [ -z "${AGENT_SESSION_ID:-}" ]; then
     _CRON_MTIME=$(stat -c %Y "$_CRON_MARKER" 2>/dev/null || echo 0)
     _CRON_AGE=$(( ($(date -u +%s) - _CRON_MTIME) / 3600 ))
   fi
-  _SWEEP_INT_H=${BATON_SWEEP_INTERVAL_HOURS:-48}
-  _CRON_STALE_H=$(( _SWEEP_INT_H * 2 ))   # warn after two missed sweeps (default 96h)
+  _SWEEP_INT_H=$(sweep_interval_hours)
+  _CRON_STALE_H=$(( _SWEEP_INT_H * _MISSED_SWEEP_MULT ))   # warn after _MISSED_SWEEP_MULT missed sweeps
   if [ "$_CRON_AGE" -lt 0 ] || [ "$_CRON_AGE" -gt "$_CRON_STALE_H" ]; then
     if [ "$_CRON_AGE" -lt 0 ]; then
       echo "NOTICE: checkpoint state not swept yet; an automatic sweep has just been launched and should clear it shortly (or run \`tools/cleanup-cron.sh\` to force one)."
@@ -192,6 +195,39 @@ WS_NAME=""
 if [ -f "$TERM_FILE" ]; then
   WS_NAME=$(jq -r '.workstream // empty' "$TERM_FILE" 2>/dev/null)
 fi
+# E1 hardening: a terminal HIT can be STALE. When CLAUDE_TERMINAL_ID is unset,
+# term_hash falls back to md5(user:tty); after a reboot a reused tty collides with
+# a prior workstream's terminals/<hash>.json, binding a resumed session to the
+# wrong (stale) workstream. If the LIVE session_id is authoritatively stamped on a
+# DIFFERENT workstream, the resumed session belongs there - divert + correct the
+# stale binding. Gated off source=clear: on /clear the terminal binding is
+# legitimate and MUST win even when a decoy record carries the id (E1-A). When no
+# other workstream claims this id (the normal case) the terminal binding stands.
+if [ -n "$WS_NAME" ] && [ "$MATCHER" != "clear" ]; then
+  _REACQ_WS=$(find_workstream_by_session_id "$TRACKING" "$SESSION_ID")
+  if [ -n "$_REACQ_WS" ] && [ "$_REACQ_WS" != "$WS_NAME" ]; then
+    log_event "$PROJECT_DIR" session-start rebind-stale-terminal "from=$WS_NAME" "to=$_REACQ_WS" "session_id=$SESSION_ID" 2>/dev/null
+    WS_NAME="$_REACQ_WS"
+    rebind_terminal "$TRACKING" "$WS_NAME"
+  fi
+fi
+if [ -z "$WS_NAME" ]; then
+  # E1 crash recovery: terminal binding missing (new terminal after a crash/
+  # reboot). Before minting fresh, reverse-lookup a workstream whose session_id
+  # == this (resumed) session's id and rebind THIS terminal onto it. Reached
+  # ONLY on a terminal-miss, so /clear (terminal hit above) never consults
+  # session_id - non-interference is structural, not a source:resume gate.
+  _REACQ_WS=$(find_workstream_by_session_id "$TRACKING" "$SESSION_ID")
+  if [ -n "$_REACQ_WS" ]; then
+    WS_NAME="$_REACQ_WS"
+    rebind_terminal "$TRACKING" "$WS_NAME"
+    log_event "$PROJECT_DIR" session-start reacquire-by-session-id "workstream=$WS_NAME" "session_id=$SESSION_ID" 2>/dev/null
+    if [ -z "${AGENT_SESSION_ID:-}" ]; then
+      echo "NOTE: terminal binding missing; reacquired workstream '$WS_NAME' via session_id."
+      echo ""
+    fi
+  fi
+fi
 if [ -z "$WS_NAME" ]; then
   # State missing or unparseable → create fresh workstream + bind
   BRANCH=$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
@@ -236,6 +272,12 @@ if [ "$WS_VALID" = false ]; then
   WS_FILE="$TRACKING/workstreams/${WS_NAME}.json"
 fi
 
+# E1 crash-recovery anchor: stamp session_id on the resolved workstream record.
+# Additive field, off the routing path (only READ on a later terminal-miss), so
+# it cannot disturb /clear. Refreshed every main-session SessionStart; subagent
+# Cases A/B exited far above and never reach here. WS_FILE is parseable (WS_VALID).
+jq --arg sid "$SESSION_ID" '.session_id = $sid' "$WS_FILE" | atomic_write "$WS_FILE"
+
 WS_PROGRESS=$(jq -r '.progress_file // empty' "$WS_FILE" 2>/dev/null)
 WS_PHASE=$(jq -r '.phase // "unknown"' "$WS_FILE" 2>/dev/null)
 WS_DISPLAY=$(jq -r '.display_name // empty' "$WS_FILE" 2>/dev/null)
@@ -263,8 +305,13 @@ else
   fi
 fi
 
-# Bump terminals/<hash>.json updated_at
-jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.updated_at = $ts' "$TERM_FILE" \
+# Bump terminals/<hash>.json updated_at; stamp the tmux pane id when inside
+# tmux so E6 same-terminal automation can target this exact pane (absent
+# outside tmux -> injector degrades to a clean no-op).
+_tmux_pane=""
+[ -n "${TMUX:-}" ] && _tmux_pane="${TMUX_PANE:-}"
+jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg pane "$_tmux_pane" \
+  '.updated_at = $ts | (if $pane == "" then del(.tmux_pane) else .tmux_pane = $pane end)' "$TERM_FILE" \
   | atomic_write "$TERM_FILE"
 
 # List other active workstreams so user can see/switch
@@ -318,7 +365,7 @@ _SS_BINDING="true"
 # ---------------------------------------------------------------------------
 # Cache pre-warm - fires a max_tokens:0 request to seed the prompt cache.
 # Gate: BATON_PREWARM=1, matcher in {clear,resume}, ANTHROPIC_API_KEY set,
-#       BATON_PREWARM_SYSTEM_FILE exists + readable + >=4096 bytes.
+#       BATON_PREWARM_SYSTEM_FILE exists + readable + >=_PREWARM_MIN_SYS_BYTES bytes.
 # Default: BATON_PREWARM=0 (inert).
 #
 # Mock seam: override prewarm::_request(body→stdin) → writes HTTP response body
@@ -366,7 +413,7 @@ _prewarm_run() {
   local sys_file="${BATON_PREWARM_SYSTEM_FILE:-}"
   [ -n "$sys_file" ] && [ -r "$sys_file" ] || return 0
   local fsize; fsize=$(wc -c < "$sys_file" 2>/dev/null || echo 0)
-  [ "$fsize" -ge 4096 ] || return 0
+  [ "$fsize" -ge "$_PREWARM_MIN_SYS_BYTES" ] || return 0
 
   # Source cost model for model resolution and pricing.
   # Hook lives at .claude/hooks/; lib/ is at repo root (two levels up).

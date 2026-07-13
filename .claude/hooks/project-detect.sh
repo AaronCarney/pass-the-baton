@@ -149,12 +149,16 @@ else
 
   if [ -n "$TARGET_WS" ]; then
     rebind_terminal "$TRACKING" "$TARGET_WS"
-    # Bump the rebound workstream so it stays the freshest match next time.
+    # Bump the rebound workstream so it stays the freshest match next time, and
+    # move the session_id stamp onto it. Any path that rebinds a terminal MUST
+    # re-stamp session_id: session-start's terminal-HIT cross-check diverts to
+    # whichever ws authoritatively holds the live session_id, so leaving the
+    # stamp on the previous ws would silently revert this deliberate switch.
     TGT_FILE="$TRACKING/workstreams/${TARGET_WS}.json"
     TMP=$(mktemp -p "$(dirname "$TGT_FILE")")
     exec 9>"${TGT_FILE}.lock"
     flock 9
-    jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.updated_at = $ts' "$TGT_FILE" > "$TMP" && mv "$TMP" "$TGT_FILE"
+    jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg sid "$SESSION_ID" '.updated_at = $ts | .session_id = $sid' "$TGT_FILE" > "$TMP" && mv "$TMP" "$TGT_FILE"
     flock -u 9
     exec 9>&-
   else

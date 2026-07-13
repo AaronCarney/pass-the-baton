@@ -4,6 +4,7 @@
 # JSON shape: {winners, per_method:{cost,time,outcome}, paired_deltas,
 #              threshold_sweep, caveats, window, session_count}
 set -uo pipefail
+: "${_RECOMMEND_WINDOW_FALLBACK_DAYS:=180}"   # default look-back window (days) when events have no min .ts
 
 _RAGG_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -17,7 +18,7 @@ source "$_RAGG_REPO/lib/recommend-threshold-sweep.sh"
 source "$_RAGG_REPO/lib/eventlog.sh"
 
 # recommend_window::from EVENTS_FILE [SINCE_OVERRIDE]
-# Returns YYYY-MM-DD: min .ts from events, or --since override, or 180-day fallback.
+# Returns YYYY-MM-DD: min .ts from events, or --since override, or _RECOMMEND_WINDOW_FALLBACK_DAYS fallback.
 recommend_window::from() {
   local events="$1"
   local since="${2:-}"
@@ -33,7 +34,7 @@ recommend_window::from() {
   if [[ -n "${min_ts:-}" ]]; then
     echo "${min_ts%T*}"
   else
-    date -u -d "$today_iso - 180 days" +%Y-%m-%d
+    date -u -d "$today_iso - ${_RECOMMEND_WINDOW_FALLBACK_DAYS} days" +%Y-%m-%d
   fi
 }
 

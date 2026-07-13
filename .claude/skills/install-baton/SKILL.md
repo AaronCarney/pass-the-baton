@@ -55,7 +55,7 @@ Default: `$BATON_DIR/progress`
 
 ```
 Where should pruned workstreams be archived? (BATON_ARCHIVE_DIR)
-  Idle >7d records move here. Recoverable via /resume.
+  Idle >7d records move here. Restore a known id with tools/restore-workstream.sh.
 ```
 
 Default: `$HOME/.local/share/baton`
@@ -112,7 +112,7 @@ Only proceed on explicit affirmative. On yes: back up the settings file (`cp ~/.
 
 ### Step 5: Install the crontab line (durable write - confirm before applying)
 
-The cleanup-cron sweeps stale workstreams every 48h. Check whether the line is already present:
+The cleanup-cron sweeps stale workstreams every 2 days. Check whether the line is already present:
 
 ```bash
 crontab -l 2>/dev/null | grep -q cleanup-cron-wrapper && echo present || echo absent

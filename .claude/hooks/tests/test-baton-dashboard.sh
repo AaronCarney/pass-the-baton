@@ -162,7 +162,7 @@ printf '%s\n' "$n_out" | grep -E '^[[:space:]]*display_name:' | grep -q 'roundtr
 # CC6 E-A: displayed defaults must equal consumer defaults (fresh config, no env).
 rm -f "$XDG_CONFIG_HOME/baton/config.json"; echo '{}' > "$XDG_CONFIG_HOME/baton/config.json"
 fresh=$( unset BATON_TRACKING_TTL_DAYS BATON_TMP_TTL_HOURS BATON_SUMMARY_MODEL BATON_EVENT_LOG BATON_TOKEN_RATIOS; bash "$DASH" show )
-val_of(){ printf '%s\n' "$fresh" | sed -n "s/^[[:space:]]*$1[[:space:]]*//p"; }
+val_of(){ printf '%s\n' "$fresh" | sed -n "s/^[[:space:]]*$1[[:space:]]*//p" | sed -E 's/[[:space:]]*\[[a-z][a-z -]*\][[:space:]]*$//'; }
 _aeq 7  "$(val_of 'BATON_TRACKING_TTL_DAYS:')" 'tracking ttl default shows 7'
 _aeq 24 "$(val_of 'BATON_TMP_TTL_HOURS:')"     'tmp ttl default shows 24'
 _aeq '' "$(val_of 'BATON_SUMMARY_MODEL:')"      'summary model default empty'
@@ -180,6 +180,72 @@ if jq -e . "$CFG" >/dev/null 2>&1; then PASS=$((PASS+1)); else FAIL=$((FAIL+1));
 # E-C: the now-false 'telemetry only / fixed 23%' note must be gone (honesty fix)
 if ! bash "$DASH" show 2>/dev/null | grep -qi 'fixed 23'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'FAIL: show note no longer claims fixed-23 trigger' >&2; fi
 if ! bash "$DASH" show 2>/dev/null | grep -qi 'telemetry only'; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo 'FAIL: show note no longer claims telemetry-only' >&2; fi
+
+# === E3: effective-source tags + honesty ===
+# ES1: an unset key shows [default].
+rm -f "$XDG_CONFIG_HOME/baton/config.json"
+es_out=$(bash "$DASH" show)
+_acontains "$es_out" '[default]' 'a default-sourced key shows [default]'
+# Row-scoped tag assertion helper: the tag must be on the SAME line as the key,
+# not merely somewhere in the multi-row output.
+_row_has(){ printf '%s\n' "$1" | grep -E "^[[:space:]]*$2:" | grep -qF -- "$3"; }
+_row_lacks(){ ! _row_has "$1" "$2" "$3"; }
+# ES2: a config-set key (env==config name) shows [config] on its own row.
+bash "$DASH" set BATON_WORKSTREAM_TTL_DAYS=14 >/dev/null
+es_out=$(bash "$DASH" show)
+_row_has "$es_out" 'BATON_WORKSTREAM_TTL_DAYS' '[config]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: config-set key should show [config]' >&2; }
+# ES3: an env-overridden key shows [env].
+es_out=$(BATON_WORKSTREAM_TTL_DAYS=99 bash "$DASH" show)
+_row_has "$es_out" 'BATON_WORKSTREAM_TTL_DAYS' '[env]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: env-set key should show [env]' >&2; }
+# ES3b: a config-set LEGACY key (env name != config key) shows [config] via the two-arg _src path.
+bash "$DASH" set threshold_pct=37 >/dev/null
+es_out=$(bash "$DASH" show)
+_row_has "$es_out" 'threshold_pct' '[config]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: config-set legacy key threshold_pct should show [config]' >&2; }
+# ES3c: same legacy key, env override -> [env] (two-arg _src honors env first).
+es_out=$(BATON_PCT_THRESHOLD=41 bash "$DASH" show)
+_row_has "$es_out" 'threshold_pct' '[env]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: env-set legacy key threshold_pct should show [env]' >&2; }
+# ES7/ES8/ES9: the 3 config-only keys show a fixed [config-only] tag, NEVER [env], and
+# their VALUE column must not reflect the exported (inert) env var.
+es_out=$(BATON_TEMPLATES_DIR=/tmp/leakxx BATON_PROJECT_CONTEXT_FILE=/tmp/leakyy template=leakzz bash "$DASH" show)
+_row_has "$es_out" 'templates_dir' '[config-only]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: templates_dir must show [config-only]' >&2; }
+_row_lacks "$es_out" 'templates_dir' '[env]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: templates_dir must NOT show [env]' >&2; }
+_row_lacks "$es_out" 'templates_dir' '/tmp/leakxx' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: templates_dir value must not reflect the inert env var' >&2; }
+_row_has "$es_out" 'project_context_file' '[config-only]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: project_context_file must show [config-only]' >&2; }
+_row_lacks "$es_out" 'project_context_file' '[env]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: project_context_file must NOT show [env]' >&2; }
+_row_lacks "$es_out" 'project_context_file' '/tmp/leakyy' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: project_context_file value must not reflect the inert env var' >&2; }
+_row_has "$es_out" 'template' '[config-only]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: template must show [config-only]' >&2; }
+_row_lacks "$es_out" 'template' '[env]' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: template must NOT show [env] (selector is config-direct)' >&2; }
+# ES7b/ES8b/ES9b: positive value assertion - the config-only VALUE column reflects the
+# config.json value (guards the newly config-direct read from silently showing empty; a
+# broken jq read that returned '' would pass every negative assert above).
+bash "$DASH" set templates_dir=/tmp/cfgdir >/dev/null
+bash "$DASH" set project_context_file=/tmp/cfgctx >/dev/null
+mkdir -p "$XDG_CONFIG_HOME/baton/templates"; : > "$XDG_CONFIG_HOME/baton/templates/custom-tpl.md"
+bash "$DASH" set template=custom-tpl >/dev/null
+es_out=$(bash "$DASH" show)
+_row_has "$es_out" 'templates_dir' '/tmp/cfgdir' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: templates_dir value column must show the config value' >&2; }
+_row_has "$es_out" 'project_context_file' '/tmp/cfgctx' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: project_context_file value column must show the config value' >&2; }
+_row_has "$es_out" 'template' 'custom-tpl' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: template value column must show the config value' >&2; }
+# ES4: the two locator keys are tagged env-only by design.
+es_out=$(bash "$DASH" show)
+_row_has "$es_out" 'BATON_DIR' 'env-only by design' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: BATON_DIR must show env-only-by-design tag' >&2; }
+_row_has "$es_out" 'BATON_PROJECT_DIR' 'env-only by design' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: BATON_PROJECT_DIR must show env-only-by-design tag' >&2; }
+# ES5: the stale env-only-CLIs claim is GONE.
+case "$es_out" in *'read env-only'*|*'query.sh'*) FAIL=$((FAIL+1)); echo 'FAIL: stale env-only-CLIs footnote still present' >&2;; *) PASS=$((PASS+1));; esac
+# ES6: no 'interactive' claim in the usage/help text.
+help_out=$(bash "$DASH" bogus-cmd 2>&1 || true); head_out=$(head -8 "$DASH")
+case "$head_out" in *interactive*) FAIL=$((FAIL+1)); echo 'FAIL: interactive claim still in usage comment' >&2;; *) PASS=$((PASS+1));; esac
+
+# === E4: single-sourced threshold default + helper-driven TTL rows ===
+echo '{}' > "$CFG"
+e4_fresh=$( unset BATON_PCT_THRESHOLD BATON_WORKSTREAM_TTL_DAYS BATON_TRACKING_TTL_DAYS BATON_TMP_TTL_HOURS; bash "$DASH" show )
+e4_val(){ printf '%s\n' "$e4_fresh" | sed -n "s/^[[:space:]]*$1[[:space:]]*//p" | sed -E 's/[[:space:]]*\[[a-z][a-z -]*\][[:space:]]*$//'; }
+_aeq 20 "$(e4_val 'threshold_pct:')" 'threshold default row shows 20 (from constant)'
+_aeq 30 "$(e4_val 'BATON_WORKSTREAM_TTL_DAYS:')" 'workstream ttl default row shows 30 (from helper)'
+_aeq 7  "$(e4_val 'BATON_TRACKING_TTL_DAYS:')" 'tracking ttl default row shows 7 (from helper)'
+_aeq 24 "$(e4_val 'BATON_TMP_TTL_HOURS:')" 'tmp ttl default row shows 24 (from helper)'
+# Footnote single-sources the bounds fallback to the constant (not a literal 23).
+! bash "$DASH" show 2>/dev/null | grep -q 'else 23' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: footnote still hardcodes else 23' >&2; }
 
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ]

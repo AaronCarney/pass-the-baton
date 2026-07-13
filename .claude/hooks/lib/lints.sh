@@ -6,6 +6,8 @@
 
 set -u
 
+: "${_MIN_DESC_CHARS_DEFAULT:=20}"   # jq fallback for tasks_done/remaining min description chars
+
 # V8 - placeholder-survivor regex. Rejects any rendered progress file that still
 # contains an unfilled <<UPPER_CASE>> placeholder in BODY content.
 #
@@ -131,8 +133,8 @@ EOF
           fi
         fi
         local td_min tr_min
-        td_min=$(jq -r '.lints.V7.sub_lints.task_state_json_entry_shape.tasks_done_description_min_chars // 20' "$manifest_file")
-        tr_min=$(jq -r '.lints.V7.sub_lints.task_state_json_entry_shape.tasks_remaining_description_min_chars // 20' "$manifest_file")
+        td_min=$(jq -r '.lints.V7.sub_lints.task_state_json_entry_shape.tasks_done_description_min_chars // '"$_MIN_DESC_CHARS_DEFAULT"'' "$manifest_file")
+        tr_min=$(jq -r '.lints.V7.sub_lints.task_state_json_entry_shape.tasks_remaining_description_min_chars // '"$_MIN_DESC_CHARS_DEFAULT"'' "$manifest_file")
         local bad_entries; bad_entries=$(echo "$json_block" | jq -r --argjson m "$td_min" '.tasks_done[] | select(.id == null or .description == null or (.description | length) < $m) | .id // "<no-id>"' 2>/dev/null)
         if [ -n "$bad_entries" ]; then
           cat >&2 <<EOF

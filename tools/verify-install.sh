@@ -79,7 +79,7 @@ fi
 
 # 4. Full suite (unless --skip-suite).
 if [ "$SKIP_SUITE" = "0" ]; then
-  for SCRIPT in test-workstream-hooks.sh test-restore-workstream.sh test-resume.sh test-install-tools.sh test-prompt-sync.sh; do
+  for SCRIPT in test-workstream-hooks.sh test-restore-workstream.sh test-install-tools.sh test-prompt-sync.sh; do
     SP="$REPO_DIR/.claude/hooks/tests/$SCRIPT"
     if [ ! -f "$SP" ]; then continue; fi
     if bash "$SP" 2>&1 | grep -qE '\b0 failed\b'; then

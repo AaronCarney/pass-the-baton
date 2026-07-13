@@ -8,6 +8,9 @@ set -u
 # shellcheck source=/dev/null
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/eventlog.sh"
 
+# Outcome-quality look-back window (days); knob-tunable, default 30.
+outcome_window_days() { printf '%s' "${BATON_OUTCOME_WINDOW_DAYS:-30}"; }
+
 # recommend_outcome::winner OUTCOME_JSON_PATH
 #   PRIMARY rule: method with max .headline[m].code_execution.success_rate (non-null).
 #   FALLBACK rule: method with max sum-over-subkinds-of-.n when no method has success_rate.
@@ -63,11 +66,11 @@ recommend_outcome::post_e16_days() {
 }
 
 # recommend_outcome::is_insufficient DAYS
-#   Prints "true" if DAYS < 30 (insufficient data), "false" otherwise.
-#   DAYS == 30 → "false" (closed-upper inclusive: 30 is sufficient).
+#   Prints "true" if DAYS < outcome_window_days (insufficient data), "false" otherwise.
+#   DAYS == window → "false" (closed-upper inclusive: a full window is sufficient).
 recommend_outcome::is_insufficient() {
   local days="$1"
-  if (( days < 30 )); then
+  if (( days < $(outcome_window_days) )); then
     echo "true"
   else
     echo "false"

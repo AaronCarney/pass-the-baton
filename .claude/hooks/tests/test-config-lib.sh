@@ -77,5 +77,27 @@ _aeq 'task' "$(jq -r '.template' "$CFG")" 'set seeds a missing config.json'
 # valid JSON after writes (atomic mv left no partial/temp content)
 _aeq '0' "$(jq -e . "$CFG" >/dev/null 2>&1; echo $?)" 'config.json stays valid JSON after set'
 
+# === _cfg::source layer reporting (E3) ===
+# S1: nothing set -> default.
+rm -f "$CFG"; unset BATON_PCT_THRESHOLD
+_aeq 'default' "$(_cfg::source BATON_PCT_THRESHOLD)" 'source=default when nothing set'
+# S2: value in config.json -> config.
+echo '{"BATON_PCT_THRESHOLD":"35"}' > "$CFG"; unset BATON_PCT_THRESHOLD
+_aeq 'config' "$(_cfg::source BATON_PCT_THRESHOLD)" 'source=config when only config set'
+# S3: env set -> env (beats config).
+export BATON_PCT_THRESHOLD=50
+_aeq 'env' "$(_cfg::source BATON_PCT_THRESHOLD)" 'source=env when env set'
+unset BATON_PCT_THRESHOLD
+# S4: legacy config_key arg (env name differs from JSON key).
+echo '{"threshold_pct":"42"}' > "$CFG"; unset BATON_PCT_THRESHOLD
+_aeq 'config' "$(_cfg::source BATON_PCT_THRESHOLD threshold_pct)" 'source=config via config_key'
+_aeq 'default' "$(_cfg::source BATON_PCT_THRESHOLD)" 'uppercase key ignored when config_key omitted -> default'
+# S5: JSON null in config -> default (mirrors _cfg::get case 5).
+echo '{"BATON_PCT_THRESHOLD":null}' > "$CFG"; unset BATON_PCT_THRESHOLD
+_aeq 'default' "$(_cfg::source BATON_PCT_THRESHOLD)" 'JSON null -> default source'
+# S6: malformed config JSON -> default (jq errors swallowed, mirrors _cfg::get).
+printf 'not valid json {{{' > "$CFG"; unset BATON_PCT_THRESHOLD
+_aeq 'default' "$(_cfg::source BATON_PCT_THRESHOLD)" 'malformed config -> default source'
+
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ]

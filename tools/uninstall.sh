@@ -6,6 +6,9 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 
+# shellcheck source=tools/lib/cron-schedule.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib/cron-schedule.sh"
+
 SETTINGS=""
 BATON_DIR_ARG=""
 TARGET_ARG=""
@@ -120,6 +123,16 @@ if [ -n "$TARGET_EXPLICIT" ]; then
     echo "OK: removed $WRAPPER"
   fi
   unset CONFIG_HOME ENV_FILE WRAPPER
+
+  # 2c. Remove project-local skills copied by install step 4b.
+  SKILLS_DIR="$TARGET_EXPLICIT/.claude/skills"
+  for _skill in baton install-baton; do
+    if [ -e "$SKILLS_DIR/$_skill" ]; then
+      rm -rf "${SKILLS_DIR:?}/$_skill"
+      echo "OK: removed skill $_skill from $SKILLS_DIR"
+    fi
+  done
+  unset _skill SKILLS_DIR
 fi
 
 # 3. Archive checkpoint dir.
@@ -135,5 +148,5 @@ fi
 # 4. Crontab snippet to remove.
 echo ""
 echo "=== Manual step: remove this line from your crontab (run \`crontab -e\`) ==="
-echo "0 */48 * * * $REPO_DIR/tools/cleanup-cron-wrapper.sh >> ..."
+echo "$BATON_CRON_SCHEDULE $REPO_DIR/tools/cleanup-cron-wrapper.sh >> ..."
 echo "=== End ==="

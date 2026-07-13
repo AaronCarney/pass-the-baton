@@ -1,19 +1,40 @@
 # Changelog
 
-All notable changes to Pass the Baton are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project will adopt [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once `0.1.0` is cut.
+All notable changes to Pass the Baton are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as of `0.3.0`.
 
 ---
 
 ## [Unreleased]
 
+---
+
+## [0.3.0] - 2026-07-12
+
+The "friction-free continuity" release: crash recovery, same-terminal auto-continue, an honest settings dashboard, and every checkpoint policy value single-sourced.
+
+### Added
+
+- **Same-terminal auto-continue** (opt-in, off by default): set `BATON_AUTO_CONTINUE=1` and, in a tmux session, a checkpoint save now drives `/clear` plus a continue nudge into your pane automatically - no manual keystrokes between checkpointed sessions. Tunable via `BATON_AUTO_CONTINUE_NUDGE` (default `proceed`) and audited to `BATON_AUTO_CONTINUE_LOG`. Outside tmux, or unset, it is a clean no-op. See `docs/configuration.md`.
+- **User-extensible Key Files roles**: `.baton-project/project-context.json` now takes a registry that merges over the six built-in roles, so you can override a role's path/label or add a brand-new role type (surfaced as an injected Key Files pointer) with no code edit. Role values accept the pre-existing string-path shorthand or an object (`path`/`label`/`hint`/`convention`/`order`). See `docs/project-context.md`.
+- **Crash recovery via session-id reacquisition**: on `claude --resume` in a new terminal (binding lost after a crash/reboot), the session is reattached to its workstream by matching the `session_id` stamped on the record, before any fresh mint. `/clear` still resolves by terminal hash and never consults session_id.
+
+### Changed
+
+- **Checkpoint default threshold is now 20% context fill (was 23%)**, single-sourced as `BATON_DEFAULT_PCT_THRESHOLD`. Override with `BATON_PCT_THRESHOLD`.
+- **Dashboard shows each key's effective source.** `baton-dashboard.sh show` now annotates every row with `[env]` / `[config]` / `[default]` so a configured value is never confused with a compiled default.
+- E2 cross-path command reachability: `install.sh` now installs the kept skills (`baton`, `install-baton`) into the target's `.claude/skills/`, fixing manual installs that previously yielded zero slash commands; `uninstall` removes them. Removed the superseded `/resume` skill and `tools/resume.sh` - use native `claude --resume` with automatic session_id reacquisition. Docs now name the plugin's namespaced `/pass-the-baton:baton`. Note: removing `/resume` also removed the only enumerator of archived/idle workstreams; `tools/restore-workstream.sh` restores a record but needs a known workstream id (there is no built-in id discovery for archived records).
 - Adaptive threshold tuner now runs automatically: each session start runs one controller cycle, gated on event collection being on (open arc or `BATON_COLLECT=1`); a no-op under the placeholder `score_hold` until a real scoring function is configured.
 - `tuner_snapshot` telemetry event: each main session records the resolved threshold-tuner knob vector (setpoint, deadband, step, safety bounds, dwell, scoring fn) plus the effective threshold and `session_id`, gated on event collection. Lets a knob setting be joined to its session's `cost_rollup` from the logs alone.
+
+### Fixed
+
+- Cron uninstall now removes the exact schedule install writes. The cleanup-cron cadence is single-sourced (`0 0 */2 * *`, every 2 days); previously `uninstall` matched a stale `0 */48 * * *` that could fail to remove the installed line.
 
 ---
 
 ## [0.1.0-pre] - Pre-release history
 
-The entries below predate the first tagged release. They document development work as it landed; section dates are landing dates, not release dates. Once `0.1.0` is cut, these will be retained under this anchor for provenance.
+The entries below predate the first tagged release (`0.3.0`). They document development work as it landed; section dates are landing dates, not release dates. They are retained under this anchor for provenance.
 
 ---
 

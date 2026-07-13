@@ -3,6 +3,13 @@
 # Sourced by tools and (progressively) hooks. CC6: additive - does not change any
 # existing hook's read path until that hook is migrated.
 
+# Canonical compiled default for the checkpoint trigger threshold (context-fill %).
+# SINGLE SOURCE OF TRUTH: checkpoint_threshold, the context-checkpoint faithful
+# fallback, the dashboard default arg, and every "current default" display read
+# this one constant, so a shown value can never disagree with the gate. Owner-set
+# to 20 (directive 2026-07-11); the user-facing knob stays BATON_PCT_THRESHOLD.
+BATON_DEFAULT_PCT_THRESHOLD=20
+
 _cfg::path() {
   printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
 }
@@ -39,6 +46,31 @@ _cfg::get() {
   printf '%s' "$default"
 }
 
+_cfg::source() {
+  # Usage: _cfg::source ENV_KEY [config_key]
+  # Reports WHICH layer _cfg::get would resolve from: env|config|default.
+  # Same precedence and null/malformed handling as _cfg::get, value discarded.
+  local key="$1"
+  local cfg_key="${2:-$key}"
+  local env_val
+  env_val="${!key:-}"
+  if [ -n "$env_val" ]; then
+    printf 'env'
+    return 0
+  fi
+  local cfg
+  cfg="$(_cfg::path)"
+  if [ -f "$cfg" ]; then
+    local json_val
+    json_val="$(jq -r --arg k "$cfg_key" '.[$k] // empty' "$cfg" 2>/dev/null || true)"
+    if [ -n "$json_val" ] && [ "$json_val" != 'null' ]; then
+      printf 'config'
+      return 0
+    fi
+  fi
+  printf 'default'
+}
+
 _cfg::set() {
   # Usage: _cfg::set KEY VALUE [is_number]
   # Atomically write .[KEY]=VALUE into config.json (env layer is NOT touched - this only
@@ -47,7 +79,7 @@ _cfg::set() {
   # Self-contained: resolves its own path, seeds a missing dir/file, atomic mktemp+mv under flock.
   # The sole config WRITE path (mirrors _cfg::get as the sole READ path) so the dashboard and the
   # threshold tuner cannot drift. Round-trips with _cfg::get (use the persisted config_key as KEY,
-  # e.g. _cfg::set threshold_pct 30 number  <->  _cfg::get BATON_PCT_THRESHOLD 23 threshold_pct).
+  # e.g. _cfg::set threshold_pct 30 number  <->  _cfg::get BATON_PCT_THRESHOLD 20 threshold_pct).
   local key="$1" value="$2" is_number="${3:-}"
   local cfg; cfg="$(_cfg::path)"
   mkdir -p "$(dirname "$cfg")"
@@ -69,7 +101,9 @@ _cfg::set() {
 
 export -f _cfg::get 2>/dev/null || true
 export -f _cfg::set 2>/dev/null || true
+export -f _cfg::source 2>/dev/null || true
 # Export the dependency too: _cfg::get calls _cfg::path internally, so a child
 # process inheriting the exported _cfg::get must also inherit _cfg::path or it
 # silently skips config.json. (CC6 code-review hardening.)
 export -f _cfg::path 2>/dev/null || true
+export BATON_DEFAULT_PCT_THRESHOLD 2>/dev/null || true

@@ -41,7 +41,7 @@ agent_type=$(printf '%s' "$payload" | jq -r '.agent_type // ""')
 # per-arc sub-agent spend is not silently lost.
 usage_json=""
 for _ in $(seq 1 ${CC16_USAGE_POLL_TRIES:-20}); do
-  [ -f "$agent_transcript_path" ] && usage_json=$(tail -n 50 "$agent_transcript_path" \
+  [ -f "$agent_transcript_path" ] && usage_json=$(tail -n "$_TRANSCRIPT_SCAN_LINES" "$agent_transcript_path" \
     | jq -s '[.[] | select(.message.role=="assistant") | .message.usage] | last' 2>/dev/null)
   [ -n "$usage_json" ] && [ "$usage_json" != "null" ] && break
   usage_json=""
@@ -51,7 +51,7 @@ done
 [ -z "$usage_json" ] && exit 0
 
 # Extract model from last assistant message.
-model=$(tail -n 50 "$agent_transcript_path" \
+model=$(tail -n "$_TRANSCRIPT_SCAN_LINES" "$agent_transcript_path" \
   | jq -rs '[.[] | select(.message.role=="assistant") | .message.model] | last // ""' 2>/dev/null)
 
 # --- parse token fields ------------------------------------------------------

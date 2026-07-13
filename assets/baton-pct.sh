@@ -31,6 +31,11 @@ if ! declare -F _cfg::get >/dev/null 2>&1; then
   }
 fi
 
+# Statusline color bands. iter-3 plan-review dropped the env-var knob (:57, no
+# dashboard consumer), so these are fixed constants, not tunables.
+: "${_PCT_RED:=80}"
+: "${_PCT_YELLOW:=50}"
+
 SESSION_ID="${1:-${SESSION_ID:-}}"
 [ -z "$SESSION_ID" ] && exit 0
 
@@ -54,17 +59,17 @@ case "$MODE" in
     printf 'CTX:%s%%' "$PCT"
     ;;
   solid)
-    # Threshold hardcoded at 80 (iter-3 plan-review: env-var SOLID_THRESHOLD knob dropped - no dashboard consumer).
-    if [ "$PCT" -ge 80 ] 2>/dev/null; then
+    # Threshold hardcoded at $_PCT_RED (iter-3 plan-review: env-var SOLID_THRESHOLD knob dropped - no dashboard consumer).
+    if [ "$PCT" -ge "$_PCT_RED" ] 2>/dev/null; then
       printf '\033[31mCTX:%s%%\033[0m' "$PCT"
     else
       printf 'CTX:%s%%' "$PCT"
     fi
     ;;
   bands)
-    if [ "$PCT" -ge 80 ] 2>/dev/null; then
+    if [ "$PCT" -ge "$_PCT_RED" ] 2>/dev/null; then
       printf '\033[31mCTX:%s%%\033[0m' "$PCT"
-    elif [ "$PCT" -ge 50 ] 2>/dev/null; then
+    elif [ "$PCT" -ge "$_PCT_YELLOW" ] 2>/dev/null; then
       printf '\033[33mCTX:%s%%\033[0m' "$PCT"
     else
       printf '\033[32mCTX:%s%%' "$PCT"

@@ -11,6 +11,8 @@ source "$_SD/lib/transcript.sh"
 source "$_SD/lib/cost-compare-model.sh"
 # shellcheck source=/dev/null
 source "$_SD/lib/tokens.sh"
+# shellcheck source=/dev/null
+source "$_SD/tools/lib/sweep-grid.sh"   # E5: shared threshold-sweep grid
 
 # CC6: source the shared _cfg::get resolver (env > config.json > default).
 # Self-contained: guard-source lib/config.sh; if unreachable, define a
@@ -134,7 +136,7 @@ guards=$(ccmp::payoff_guards  "$_pm" "$prefix" "$stream")
 # Sweep 10-50% in 2% steps plus 'never'. The hook fires when fill ≥ T; below
 # ~10% the post-/clear context already exceeds T (checkpoint thrash), above
 # ~50% the session is well past Claude Code's auto-compaction point.
-SWEEP_THRESHOLDS="10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 never"
+SWEEP_THRESHOLDS="$BATON_SWEEP_THRESHOLDS"
 sweep=$(ccmp::threshold_sweep "$_pm" "$prefix" "$stream" "$SWEEP_THRESHOLDS" "$sgen" "$sg_in_rate")
 # Find the numeric threshold minimizing total cost (excludes 'never'); ties
 # break to the lower threshold (smaller T checkpoints earlier - less risk of

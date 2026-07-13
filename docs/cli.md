@@ -95,12 +95,14 @@ tools/baton-dashboard.sh show
 tools/baton-dashboard.sh set key=value [key2=value2 ...]
 ```
 
+`show` annotates each key with its effective source - `[env]` (an exported `BATON_*` var), `[config]` (a value written to `config.json`), or `[default]` (the compiled default) - so a configured value is never mistaken for a built-in default.
+
 ### Keys
 
 | Key | Type | Purpose |
 |---|---|---|
 | `template` | enum: `free` / `task` / `factory` / custom | Active progress-file template. Custom templates resolve from `$XDG_CONFIG_HOME/baton/templates/<name>.md`. |
-| `threshold_pct` | integer 1-99 | Context-fill % that triggers the deferred checkpoint. Default `23`. |
+| `threshold_pct` | integer 1-99 | Context-fill % that triggers the deferred checkpoint. Default `20`. |
 | `display_name` | string | Friendly workstream display name. |
 | `templates_dir` | path | Override for the custom-templates directory. |
 | `project_context_file` | path | Per-project context JSON; default `.baton-project/project-context.json`. |

@@ -5,6 +5,9 @@
 # Bumping schema_version requires editing this single constant.
 schema_version=1
 
+: "${_MAX_EVENT_BYTES:=4096}"   # event-envelope max size
+: "${_PIPE_BUF_BYTES:=512}"   # flock-vs-plain append boundary (PIPE_BUF)
+
 # Runtime defensive shim. tools/install.sh hard-fails when flock(1) is missing
 # (it's in the required-cmd list), so a wired install always has flock. But if
 # util-linux is removed after install (or PATH changes at runtime), the
@@ -153,7 +156,7 @@ envelope::emit() {
 
   local bytes=$(( ${#line} + 1 ))   # include trailing newline
 
-  if [ "$bytes" -gt 4096 ]; then
+  if [ "$bytes" -gt "$_MAX_EVENT_BYTES" ]; then
     local trunc
     trunc=$(jq -cn \
       --argjson sv "$schema_version" \
@@ -162,7 +165,7 @@ envelope::emit() {
       --argjson ob "$bytes" \
       '{schema_version:$sv, event:$ev, ts:$ts, truncated:true, original_bytes:$ob}')
     printf '%s\n' "$trunc" >> "$log_path"
-    printf 'baton: event truncated (%d bytes > 4096)\n' "$bytes" >&2
+    printf 'baton: event truncated (%d bytes > %d)\n' "$bytes" "$_MAX_EVENT_BYTES" >&2
     return 1
   fi
 
@@ -177,7 +180,7 @@ envelope::emit() {
     fi
   fi
 
-  if [ "$bytes" -gt 512 ]; then
+  if [ "$bytes" -gt "$_PIPE_BUF_BYTES" ]; then
     (
       flock 9
       printf '%s%s\n' "$prefix" "$line" >> "$log_path"

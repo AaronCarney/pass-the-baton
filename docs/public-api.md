@@ -26,7 +26,7 @@ These four hooks define the persistence and routing behavior. Their script paths
 
 | Hook | When it fires | What we guarantee |
 |---|---|---|
-| `PreToolUse` (`context-checkpoint.sh`) | Before any tool call | Resolves the trigger threshold via `checkpoint_threshold` (env `BATON_PCT_THRESHOLD` > `config.json` `threshold_pct` > default 23); flags the terminal's workstream as `pending` on threshold cross. Once per session, then defers. |
+| `PreToolUse` (`context-checkpoint.sh`) | Before any tool call | Resolves the trigger threshold via `checkpoint_threshold` (env `BATON_PCT_THRESHOLD` > `config.json` `threshold_pct` > default 20); flags the terminal's workstream as `pending` on threshold cross. Once per session, then defers. |
 | `PostToolUse` (`checkpoint-write-trigger.sh`, matcher `Write\|Edit\|MultiEdit`) | After progress-file writes | Atomically updates `workstreams/<ws>.json` under `flock` when a progress file is written while the pending flag is set. Archives the previously-bound progress file. |
 | `SessionStart` (`session-start.sh`) | Session boot (matchers: `startup`, `resume`, `clear`, `compact`) | Injects the bound progress file as a mandatory directive when a terminal binding exists (no-op otherwise). In the main session, when event collection is on, also runs one adaptive-tuner control cycle and emits a `tuner_snapshot` event - inert under the placeholder scoring function. |
 | `UserPromptSubmit` (`project-detect.sh`) | Every user prompt | Detects project mentions and explicit `rename this session to X` patterns; updates `workstreams/<ws>.json` `display_name`. CC8: never captures prompt text in event log. |
@@ -102,9 +102,9 @@ The following are internal and may change without notice in any release:
 
 - Internal helper functions in `lib/*.sh`. Sourcing these from third-party code is unsupported; function names, argument order, and return-code semantics may change in any minor version.
 - The on-disk byte layout of the two-file state beyond the documented JSON schema - compaction style, key order, whitespace, trailing newlines. Tools that diff or hash these files byte-wise will break.
-- Anything in `tools/` other than `install.sh`. In particular, `verify-install.sh`, `uninstall.sh`, `resume.sh`, `cleanup-cron.sh`, `doctor.sh`, `query.sh`, `cost.sh`, `cost-compare.sh`, `calibrate-bytes-per-token.sh`, and `latency.sh` are convenience scripts whose flags, output format, and exit codes may change between minor versions.
+- Anything in `tools/` other than `install.sh`. In particular, `verify-install.sh`, `uninstall.sh`, `cleanup-cron.sh`, `doctor.sh`, `query.sh`, `cost.sh`, `cost-compare.sh`, `calibrate-bytes-per-token.sh`, and `latency.sh` are convenience scripts whose flags, output format, and exit codes may change between minor versions.
 - Archival file naming and directory layout under `$BATON_ARCHIVE_DIR`. Files land there; do not parse the names.
-- The cleanup-cron cadence - currently 48h, may change without notice. Treat it as "eventually".
+- The cleanup-cron cadence - currently every 2 days (`0 0 */2 * *`), may change without notice. Treat it as "eventually". (Distinct from the in-process `BATON_SWEEP_INTERVAL_HOURS` self-throttle.)
 - The layout and naming of progress files under `$BATON_PROGRESS_DIR`. The `workstreams/<name>.json` pointer is the supported way to locate the current progress file.
 - Test internals - fixtures, harness helpers, and the layout of `tests/`.
 - Anything not explicitly listed in the four bullets at the top of this document.

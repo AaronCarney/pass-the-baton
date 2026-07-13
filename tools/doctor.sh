@@ -17,6 +17,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/config.sh"   # CC6
 
 WARNED=0
 
+: "${_DOCTOR_ANOMALY_LOOKBACK_SECONDS:=86400}"   # 24h cache-anomaly look-back
+: "${_PRICING_STALE_DAYS:=90}"   # warn when PRICING_VERIFIED_DATE older than N days
+
 # Default log location.
 default_event_log() {
   local base="${XDG_STATE_HOME:-$HOME/.local/state}/baton"
@@ -92,7 +95,7 @@ fi
 # E8-T6: Cache anomalies (last 24h)
 if [ -f "$LOG" ]; then
   now_epoch=$(date -u +%s)
-  cutoff=$((now_epoch - 86400))
+  cutoff=$((now_epoch - _DOCTOR_ANOMALY_LOOKBACK_SECONDS))
   anomaly_count=0
   while IFS= read -r entry; do
     ts_str=$(printf '%s' "$entry" | jq -r '.ts // ""' 2>/dev/null)
@@ -151,7 +154,7 @@ if [ -f "$_cost_models_path" ]; then
       || date -u -j -f "%Y-%m-%d" "$PRICING_VERIFIED_DATE" +%s 2>/dev/null \
       || echo 0)
     age_days=$(( (now_epoch - verified_epoch) / 86400 ))
-    if [ "$age_days" -gt 90 ]; then
+    if [ "$age_days" -gt "$_PRICING_STALE_DAYS" ]; then
       echo "WARNING: PRICING_VERIFIED_DATE=$PRICING_VERIFIED_DATE, age=$age_days days - re-verify against https://platform.claude.com/docs/en/about-claude/pricing" >&2
       WARNED=1
     else

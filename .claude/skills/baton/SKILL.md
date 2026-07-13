@@ -5,6 +5,8 @@ description: View or change Pass the Baton configuration. Use for template switc
 
 # /baton - Configuration Dashboard
 
+When installed as a plugin the command is namespaced: `/pass-the-baton:baton`. The bare `/baton` form is available only via the manual `install.sh` project-local install.
+
 ## When to Use
 
 - See the current Pass the Baton config (`/baton` or `/baton show`)

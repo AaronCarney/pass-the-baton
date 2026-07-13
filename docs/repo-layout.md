@@ -35,7 +35,6 @@ The full annotated file tree. For the high-level directory-role map, see the [pr
       usage-tokens.sh            # shared 5-field token extractor (cost-rollup hooks)
     tests/                       # shell test suites (see Tests section)
   skills/
-    resume/                      # /resume slash command
     baton/                       # /baton config dashboard
     install-baton/          # install assistant
   settings.json                  # repo-local hook wiring (cost + latency only)
@@ -46,7 +45,7 @@ lib/
   cost-compare-model.sh          # economic model (uncached vs cached)
 tools/
   install.sh, merge-settings.sh, install-cron.sh, uninstall.sh
-  verify-install.sh, resume.sh, restore-workstream.sh
+  verify-install.sh, restore-workstream.sh
   cleanup-cron.sh, cleanup-cron-wrapper.sh
   doctor.sh                      # health probe (FS type, perms, anomaly count)
   query.sh                       # DuckDB SQL over hook-events.jsonl

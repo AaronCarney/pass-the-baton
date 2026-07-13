@@ -61,7 +61,7 @@ case "$FILE_PATH" in
 esac
 
 # v2: workstream comes from terminals/<term_hash>.json (re-read each fire,
-# so /resume rebinds take effect immediately).
+# so a resume/rebind takes effect immediately).
 TH=$(term_hash)
 TERM_FILE="$TRACKING_DIR/terminals/${TH}.json"
 WORKSTREAM=""
@@ -154,8 +154,8 @@ if [ -n "$WORKSTREAM" ]; then
   flock 9
   if [ -f "$AP" ]; then
     TMP=$(mktemp -p "$(dirname "$AP")")
-    if ! { jq --arg p "$ABS_FILE" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg dn "$EXISTING_DN" \
-        '.progress_file = $p | .updated_at = $ts | .display_name = $dn' \
+    if ! { jq --arg p "$ABS_FILE" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg dn "$EXISTING_DN" --arg sid "$SESSION_ID" \
+        '.progress_file = $p | .updated_at = $ts | .display_name = $dn | .session_id = $sid' \
         "$AP" > "$TMP" && mv "$TMP" "$AP"; }; then
       SAVE_OK=false
       rm -f "$TMP"
@@ -163,8 +163,8 @@ if [ -n "$WORKSTREAM" ]; then
   else
     if ! jq -n --arg ws "$WORKSTREAM" --arg p "$ABS_FILE" \
         --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --arg phase "$PHASE" --arg dn "$EXISTING_DN" \
-        '{workstream:$ws, display_name:$dn, progress_file:$p, phase:$phase, updated_at:$ts}' \
+        --arg phase "$PHASE" --arg dn "$EXISTING_DN" --arg sid "$SESSION_ID" \
+        '{workstream:$ws, display_name:$dn, progress_file:$p, phase:$phase, updated_at:$ts, session_id:$sid}' \
         > "$AP"; then
       SAVE_OK=false
     fi
@@ -236,6 +236,34 @@ fi
 # Terminal state: clear PENDING, set DONE
 rm -f "$PENDING"
 touch "$DONE_FLAG"
+
+# E6 same-terminal automation (opt-in, tmux-only). Spawn the detached injector
+# that sends /clear + a continue nudge into this pane so the human does not have
+# to. Every precondition miss -> clean no-op. Fully detached (setsid + redirected
+# fds + disown) so it outlives this hook and never writes to the hook's stdout.
+# LOAD-BEARING: this hook fires mid-turn (PostToolUse), so the pane is NON-idle at
+# spawn and the injector's first poll-until-idle correctly waits for THIS turn to
+# end before sending /clear. Moving the spawn to a Stop/idle hook would make the
+# pane already-idle at spawn and fire /clear prematurely - do not relocate it.
+if [ "${BATON_AUTO_CONTINUE:-0}" = "1" ] && [ -n "${TMUX:-}" ]; then
+  _AC_PANE=""
+  [ -f "$TERM_FILE" ] && _AC_PANE=$(jq -r '.tmux_pane // empty' "$TERM_FILE" 2>/dev/null)
+  if [ -n "$_AC_PANE" ]; then
+    _AC_BIN="${BATON_AUTO_CONTINUE_BIN:-$SCRIPT_DIR/../../tools/baton-auto-continue.sh}"
+    if [ -x "$_AC_BIN" ] || [ -f "$_AC_BIN" ]; then
+      # Mirror the setsid/nohup guard at session-start.sh:459 so the injector
+      # still detaches on hosts without setsid (e.g. macOS default).
+      if command -v setsid >/dev/null 2>&1; then
+        setsid bash "$_AC_BIN" "$SESSION_ID" "$DONE_FLAG" "$_AC_PANE" \
+          >/dev/null 2>&1 </dev/null &
+      else
+        nohup bash "$_AC_BIN" "$SESSION_ID" "$DONE_FLAG" "$_AC_PANE" \
+          >/dev/null 2>&1 </dev/null &
+      fi
+      disown 2>/dev/null || true
+    fi
+  fi
+fi
 
 # Emit PostToolUse envelope (CC2). Failures go to stderr, never alter the exit code.
 {

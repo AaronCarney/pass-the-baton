@@ -55,6 +55,10 @@ assert "(c) cache_write_1h=0"   "[ '$cache_write_1h' = '0' ]"
 assert "(c) fresh_input=0"      "[ '$fresh_input' = '0' ]"
 assert "(c) output=0"           "[ '$output' = '0' ]"
 
+# --- (d) transcript-scan window constant is named and equals 50 --------------
+_tsl=$( source "$HOOKS_DIR/lib/usage-tokens.sh"; printf '%s' "${_TRANSCRIPT_SCAN_LINES:-}" )
+assert "(d) transcript-scan-lines=50" "[ '$_tsl' = '50' ]"
+
 echo
 echo "  $PASSED passed, $FAILED failed"
 if [ "$FAILED" -gt 0 ]; then

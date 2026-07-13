@@ -597,7 +597,7 @@ run_v2_rebind_survives() {
   jq -n '{session_id:"sid-rb", label:"r", started_at:"2026-05-05T00:00:00Z", branch:"main", cwd:"'"$proj"'", is_worktree:false, workstream:"old-ws", scope:{paths:[],mode:"exclusive"}, files:[], progress_file:null}' \
     > "$tracking/r.json"
   echo "$tracking/r.json" > "/tmp/claude-session-tracking-sid-rb"
-  # /resume rebind: terminal_state now points to new-ws
+  # resume/rebind: terminal_state now points to new-ws
   jq -n '{terminal_id:"TRBN", workstream:"new-ws", updated_at:"2026-05-05T00:00:00Z"}' \
     > "$tracking/terminals/${th}.json"
   # Now simulate a checkpoint write
@@ -615,9 +615,9 @@ run_v2_rebind_survives() {
 }
 run_v2_rebind_survives
 
-# V2-REBIND-CC: /resume rebind propagates to context-checkpoint.sh (PreToolUse).
+# V2-REBIND-CC: resume/rebind propagates to context-checkpoint.sh (PreToolUse).
 # Regression: before commit X, context-checkpoint read workstream only from the
-# v1 POINTER→T_FILE chain, which /resume doesn't update. The PreToolUse hook
+# v1 POINTER→T_FILE chain, which a bare rebind doesn't update. The PreToolUse hook
 # would emit a checkpoint path for the OLD workstream while the write-trigger
 # (already on v2) wrote under the NEW one, tripping the cross-workstream guard.
 run_v2_rebind_cc_survives() {
@@ -634,10 +634,10 @@ run_v2_rebind_cc_survives() {
   local sid="sid-cc-rb"
   jq -n '{session_id:"'"$sid"'", workstream:"old-ws"}' > "$tracking/old-t.json"
   echo "$tracking/old-t.json" > "/tmp/claude-session-tracking-${sid}"
-  # /resume rebind: terminal_state now points to new-ws
+  # resume/rebind: terminal_state now points to new-ws
   jq -n '{terminal_id:"TCC", workstream:"new-ws", updated_at:"2026-05-05T00:00:00Z"}' \
     > "$tracking/terminals/${th}.json"
-  # Trigger checkpoint (35% > default 23% threshold)
+  # Trigger checkpoint (35% > default 20% threshold)
   echo "35" > "/tmp/claude-context-pct-${sid}"
   # Run context-checkpoint
   local out
@@ -654,6 +654,51 @@ run_v2_rebind_cc_survives() {
   rm -rf "$proj"
 }
 run_v2_rebind_cc_survives
+
+# E4: the checkpoint gate fires at the compiled default (BATON_DEFAULT_PCT_THRESHOLD=20).
+# Sandbox the config FIRST so the default-20 premise is not inherited from the runner env.
+run_e4_threshold_boundary() {
+  export XDG_CONFIG_HOME="$(mktemp -d)/cfg"; mkdir -p "$XDG_CONFIG_HOME/baton"
+  echo '{}' > "$XDG_CONFIG_HOME/baton/config.json"
+  unset BATON_PCT_THRESHOLD
+  local proj; proj=$(mkv2)
+  local tracking="$proj/docs/sessions/.tracking"
+  jq -n '{workstream:"e4-ws", display_name:"E4", progress_file:"", phase:"unknown", updated_at:"2026-05-05T00:00:00Z"}' \
+    > "$tracking/workstreams/e4-ws.json"
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  local th
+  th=$(USER=u CLAUDE_TERMINAL_ID=TE4 term_hash)
+  jq -n '{terminal_id:"TE4", workstream:"e4-ws", updated_at:"2026-05-05T00:00:00Z"}' \
+    > "$tracking/terminals/${th}.json"
+  # Drive the SAME hook twice with a fresh sid each, varying only the pct.
+  local sid pct out
+  # pct=20 fires (20 -lt 20 is false -> gate proceeds, injects progress- payload)
+  sid="sid-e4-20"; pct=20
+  jq -n '{session_id:"'"$sid"'", workstream:"e4-ws"}' > "$tracking/e4-t-${sid}.json"
+  echo "$tracking/e4-t-${sid}.json" > "/tmp/claude-session-tracking-${sid}"
+  echo "$pct" > "/tmp/claude-context-pct-${sid}"
+  out=$(echo '{"session_id":"'"$sid"'","cwd":"'"$proj"'","tool_name":"Bash"}' \
+    | BATON_DIR="$tracking" USER=u CLAUDE_TERMINAL_ID=TE4 CLAUDE_PROJECT_DIR="$proj" bash "$CC" 2>/dev/null)
+  assert "E4-BOUNDARY: gate fires at default threshold (pct=20)" \
+    "echo \"\$out\" | grep -q 'progress-'"
+  rm -f "/tmp/claude-session-tracking-${sid}" "/tmp/claude-context-pct-${sid}" \
+        "/tmp/claude-context-triggered-${sid}" "/tmp/baton-pending-${sid}" \
+        "/tmp/baton-archive-${sid}"
+  # pct=19 does NOT fire (19 -lt 20 is true -> early exit, empty injection)
+  sid="sid-e4-19"; pct=19
+  jq -n '{session_id:"'"$sid"'", workstream:"e4-ws"}' > "$tracking/e4-t-${sid}.json"
+  echo "$tracking/e4-t-${sid}.json" > "/tmp/claude-session-tracking-${sid}"
+  echo "$pct" > "/tmp/claude-context-pct-${sid}"
+  out=$(echo '{"session_id":"'"$sid"'","cwd":"'"$proj"'","tool_name":"Bash"}' \
+    | BATON_DIR="$tracking" USER=u CLAUDE_TERMINAL_ID=TE4 CLAUDE_PROJECT_DIR="$proj" bash "$CC" 2>/dev/null)
+  assert "E4-BOUNDARY: gate does not fire below default threshold (pct=19)" \
+    "! echo \"\$out\" | grep -q 'progress-'"
+  rm -f "/tmp/claude-session-tracking-${sid}" "/tmp/claude-context-pct-${sid}" \
+        "/tmp/claude-context-triggered-${sid}" "/tmp/baton-pending-${sid}" \
+        "/tmp/baton-archive-${sid}"
+  rm -rf "$proj"
+}
+run_e4_threshold_boundary
 
 run_v2_pd_agent_exit() {
   local proj; proj=$(mkv2)
@@ -789,15 +834,6 @@ run_v2_pd_rename_suffix() {
 }
 run_v2_pd_rename_suffix
 
-run_v2_resume_shape() {
-  local f="$HOOKS_DIR/../skills/resume/SKILL.md"
-  assert "RES1: skill mentions terminals/<term_hash>.json" "grep -q 'terminals/<term_hash>.json' '$f'"
-  assert "RES2: skill calls into workstream-lib::term_hash" "grep -q 'workstream-lib.sh' '$f' && grep -q 'term_hash' '$f'"
-  assert "RES3: skill does NOT mention /tmp sticky" "! grep -q '/tmp/claude-ws-sticky' '$f'"
-  assert "RES4: skill does NOT mention md5sum hand-computation" "! grep -q 'md5sum.*cut.*-c' '$f'"
-}
-run_v2_resume_shape
-
 run_t_cc3_simple() {
   source "$HOOKS_DIR/lib/workstream-lib.sh"
   local proj
@@ -805,7 +841,7 @@ run_t_cc3_simple() {
 
   # checkpoint_threshold default + override
   unset BATON_PCT_THRESHOLD
-  assert "cc3-threshold-default" '[ "$(checkpoint_threshold)" = "23" ]'
+  assert "cc3-threshold-default" '[ "$(checkpoint_threshold)" = "20" ]'
   BATON_PCT_THRESHOLD=42 assert "cc3-threshold-env" '[ "$(BATON_PCT_THRESHOLD=42 checkpoint_threshold)" = "42" ]'
 
   # checkpoint_dir default + override
@@ -1556,6 +1592,170 @@ run_cron_probe_warning() {
   rm -rf "$proj5"
 }
 run_cron_probe_warning
+
+# E1: checkpoint stamps session_id on workstreams/<ws>.json (update-existing branch)
+run_e1_ckpt_stamp() {
+  local proj; proj=$(mkproj)
+  mkdir -p "$proj/docs/sessions/.tracking/workstreams" "$proj/docs/sessions/.tracking/terminals"
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  local sid="sid-e1ck-$$"
+  local t_file="$proj/docs/sessions/.tracking/e1ck-t.json"
+  echo '{"workstream":"ws-e1ck","display_name":"alpha","phase":"impl"}' > "$t_file"
+  echo "$t_file" > "/tmp/claude-session-tracking-$sid"
+  seed_terminal "$proj/docs/sessions/.tracking" "E1CkTerm" "ws-e1ck" "alpha"
+  touch "/tmp/baton-pending-$sid"
+  local f="$proj/docs/sessions/progress-ws-e1ck-1.md"
+  echo "# saved" > "$f"
+  run_checkpoint "$proj" "$sid" "$alpha" "$f" E1CkTerm >/dev/null 2>&1
+  local got; got=$(jq -r '.session_id // empty' "$proj/docs/sessions/.tracking/workstreams/ws-e1ck.json" 2>/dev/null)
+  assert "E1: checkpoint stamps session_id on workstream record" "[ '$got' = '$sid' ]"
+  rm -f "/tmp/claude-session-tracking-$sid" "/tmp/baton-pending-$sid" "/tmp/baton-done-$sid"
+  rm -rf "$proj"
+}
+run_e1_ckpt_stamp
+
+# ===== E1 crash-recovery: session-start reacquisition (design D, 3 required tests) =====
+
+# E1-A: /clear in a bound terminal resolves via terminal_hash and NEVER via session_id.
+# A decoy workstream carries the CURRENT session_id; the terminal is bound to a DIFFERENT ws.
+# Correct behavior: terminal wins -> bound ws, decoy ignored.
+run_e1_clear_terminal_precedence() {
+  local proj; proj=$(mkproj)
+  local tr="$proj/docs/sessions/.tracking"
+  mkdir -p "$tr/workstreams" "$tr/terminals"
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  local sid="sid-e1clear-$$"
+  # bound ws (terminal points here)
+  jq -n '{workstream:"ws-bound", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T00:00:00Z", session_id:"old-sid"}' > "$tr/workstreams/ws-bound.json"
+  seed_terminal "$tr" "ClearTerm" "ws-bound" "alpha"
+  # decoy ws whose session_id == the NEW /clear session id
+  jq -n --arg sid "$sid" '{workstream:"ws-decoy", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T09:00:00Z", session_id:$sid}' > "$tr/workstreams/ws-decoy.json"
+  USER=u CLAUDE_TERMINAL_ID=ClearTerm CLAUDE_PROJECT_DIR="$proj" BATON_DIR="$tr" \
+    bash "$SS" <<<"{\"session_id\":\"$sid\",\"cwd\":\"$alpha\",\"source\":\"clear\"}" >/dev/null 2>&1
+  local th; th=$(USER=u CLAUDE_TERMINAL_ID=ClearTerm term_hash)
+  local bound; bound=$(jq -r '.workstream' "$tr/terminals/${th}.json")
+  assert "E1-A: /clear resolves via terminal_hash (ws-bound, not decoy)" "[ '$bound' = 'ws-bound' ]"
+  rm -f "/tmp/claude-session-tracking-$sid"; rm -rf "$proj"
+}
+run_e1_clear_terminal_precedence
+
+# E1-B: new terminal + resumed session_id reacquires W and rebinds the new terminal onto it.
+run_e1_reacquire() {
+  local proj; proj=$(mkproj)
+  local tr="$proj/docs/sessions/.tracking"
+  mkdir -p "$tr/workstreams" "$tr/terminals"
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  local sid="sid-e1re-$$"
+  # W carries the resumed session_id; NO terminal binding exists for NewTerm.
+  jq -n --arg sid "$sid" '{workstream:"ws-W", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T00:00:00Z", session_id:$sid}' > "$tr/workstreams/ws-W.json"
+  USER=u CLAUDE_TERMINAL_ID=NewTerm CLAUDE_PROJECT_DIR="$proj" BATON_DIR="$tr" \
+    bash "$SS" <<<"{\"session_id\":\"$sid\",\"cwd\":\"$alpha\",\"source\":\"resume\"}" >/dev/null 2>&1
+  local th; th=$(USER=u CLAUDE_TERMINAL_ID=NewTerm term_hash)
+  assert "E1-B: new terminal rebound onto reacquired W" "[ -f '$tr/terminals/${th}.json' ] && [ \"\$(jq -r .workstream '$tr/terminals/${th}.json')\" = 'ws-W' ]"
+  # And no blank fork workstream was minted (only ws-W exists).
+  local n; n=$(ls "$tr/workstreams"/*.json | wc -l)
+  assert "E1-B: no fork workstream minted (count=1)" "[ '$n' -eq 1 ]"
+  rm -f "/tmp/claude-session-tracking-$sid"; rm -rf "$proj"
+}
+run_e1_reacquire
+
+# E1-C: new terminal + fresh session_id (no matching record) -> fresh mint.
+run_e1_fresh_mint() {
+  local proj; proj=$(mkproj)
+  local tr="$proj/docs/sessions/.tracking"
+  mkdir -p "$tr/workstreams" "$tr/terminals"
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  # An unrelated ws with a DIFFERENT session_id exists; must NOT be reacquired.
+  jq -n '{workstream:"ws-other", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T00:00:00Z", session_id:"unrelated-sid"}' > "$tr/workstreams/ws-other.json"
+  local sid="sid-e1fresh-$$"
+  USER=u CLAUDE_TERMINAL_ID=FreshTerm CLAUDE_PROJECT_DIR="$proj" BATON_DIR="$tr" \
+    bash "$SS" <<<"{\"session_id\":\"$sid\",\"cwd\":\"$alpha\",\"source\":\"resume\"}" >/dev/null 2>&1
+  local th; th=$(USER=u CLAUDE_TERMINAL_ID=FreshTerm term_hash)
+  local bound; bound=$(jq -r '.workstream' "$tr/terminals/${th}.json" 2>/dev/null)
+  assert "E1-C: fresh session_id mints a NEW workstream (not ws-other)" "[ -n '$bound' ] && [ '$bound' != 'ws-other' ]"
+  rm -f "/tmp/claude-session-tracking-$sid"; rm -rf "$proj"
+}
+run_e1_fresh_mint
+
+# E1-D: SessionStart stamps session_id on the bound (existing) workstream record.
+run_e1_ss_stamp() {
+  local proj; proj=$(mkproj)
+  local tr="$proj/docs/sessions/.tracking"
+  mkdir -p "$tr/workstreams" "$tr/terminals"
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  jq -n '{workstream:"ws-stamp", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T00:00:00Z"}' > "$tr/workstreams/ws-stamp.json"
+  seed_terminal "$tr" "StampTerm" "ws-stamp" "alpha"
+  local sid="sid-e1stamp-$$"
+  USER=u CLAUDE_TERMINAL_ID=StampTerm CLAUDE_PROJECT_DIR="$proj" BATON_DIR="$tr" \
+    bash "$SS" <<<"{\"session_id\":\"$sid\",\"cwd\":\"$alpha\",\"source\":\"startup\"}" >/dev/null 2>&1
+  local got; got=$(jq -r '.session_id // empty' "$tr/workstreams/ws-stamp.json")
+  assert "E1-D: SessionStart stamps session_id on bound record" "[ '$got' = '$sid' ]"
+  rm -f "/tmp/claude-session-tracking-$sid"; rm -rf "$proj"
+}
+run_e1_ss_stamp
+
+# E1-E: STALE terminal HIT + resumed session_id. term_hash collides with a prior
+# workstream's terminals/<hash>.json (reused tty after reboot), so the terminal
+# HIT binds the resumed session to the WRONG (stale) ws-A. The live session_id is
+# authoritatively stamped on ws-B; a resume must divert to ws-B and REBIND the
+# stale terminal. This is the seam-#1 fix: the terminal-MISS reacquire never fires
+# here because the (stale) terminal record exists.
+run_e1_stale_terminal_rebind() {
+  local proj; proj=$(mkproj)
+  local tr="$proj/docs/sessions/.tracking"
+  mkdir -p "$tr/workstreams" "$tr/terminals"
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  local sid="sid-e1stale-$$"
+  # Stale terminal HIT: CollTerm hashes to H, terminals/H.json -> ws-A.
+  jq -n '{workstream:"ws-A", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-10T00:00:00Z", session_id:"stale-sid"}' > "$tr/workstreams/ws-A.json"
+  seed_terminal "$tr" "CollTerm" "ws-A" "alpha"
+  # ws-B authoritatively carries the LIVE resumed session_id.
+  jq -n --arg sid "$sid" '{workstream:"ws-B", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T00:00:00Z", session_id:$sid}' > "$tr/workstreams/ws-B.json"
+  USER=u CLAUDE_TERMINAL_ID=CollTerm CLAUDE_PROJECT_DIR="$proj" BATON_DIR="$tr" \
+    bash "$SS" <<<"{\"session_id\":\"$sid\",\"cwd\":\"$alpha\",\"source\":\"resume\"}" >/dev/null 2>&1
+  local th; th=$(USER=u CLAUDE_TERMINAL_ID=CollTerm term_hash)
+  local bound; bound=$(jq -r '.workstream' "$tr/terminals/${th}.json" 2>/dev/null)
+  assert "E1-E: stale terminal HIT diverts + rebinds onto ws-B" "[ '$bound' = 'ws-B' ]"
+  assert "E1-E: rebind-stale-terminal event logged" "jq -e 'select(.event==\"rebind-stale-terminal\" and .to==\"ws-B\")' '$tr/hook-events.jsonl' >/dev/null 2>&1"
+  rm -f "/tmp/claude-session-tracking-$sid"; rm -rf "$proj"
+}
+run_e1_stale_terminal_rebind
+
+# E1-F: a DELIBERATE project switch (project-detect rebind) must SURVIVE the next
+# non-clear SessionStart. The switch rebinds the terminal AND moves the session_id
+# stamp onto the target; without the stamp-move the terminal-HIT cross-check (E1-E)
+# would find the live session_id still on the pre-switch ws and revert the switch.
+# Regression for the session_id stamp added to project-detect.sh's rebind branch.
+run_e1_switch_survives_ss() {
+  local proj; proj=$(mkv2)
+  local tr="$proj/docs/sessions/.tracking"
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  local sid="sid-e1switch-$$"
+  # Bound pre-switch ws "cur" carries the live session_id; "ckpt" is the switch target.
+  jq -n --arg sid "$sid" '{workstream:"cur", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T00:00:00Z", session_id:$sid}' > "$tr/workstreams/cur.json"
+  jq -n '{workstream:"ckpt", display_name:"baton", progress_file:"", phase:"impl", updated_at:"2026-07-10T00:00:00Z"}' > "$tr/workstreams/ckpt.json"
+  local th; th=$(USER=u CLAUDE_TERMINAL_ID=SwTerm term_hash)
+  jq -n '{terminal_id:"SwTerm", workstream:"cur", updated_at:"2026-07-11T00:00:00Z"}' > "$tr/terminals/${th}.json"
+  jq -n --arg sid "$sid" '{session_id:$sid, workstream:"cur"}' > "$tr/sess.json"
+  echo "$tr/sess.json" > "/tmp/claude-session-tracking-${sid}"
+  mkdir -p "$proj/proj-baton"; ln -s "$proj/proj-baton" "$proj/projects/baton"
+  # 1) deliberate switch to baton -> project-detect rebinds terminal to ckpt
+  USER=u CLAUDE_TERMINAL_ID=SwTerm CLAUDE_PROJECT_DIR="$proj" BATON_DIR="$tr" \
+    bash "$HOOKS_DIR/project-detect.sh" \
+    <<<"{\"session_id\":\"$sid\",\"prompt\":\"let us work on baton now\",\"cwd\":\"$proj\"}" >/dev/null 2>&1
+  # 2) next SessionStart (compact = non-clear) must NOT revert the switch
+  USER=u CLAUDE_TERMINAL_ID=SwTerm CLAUDE_PROJECT_DIR="$proj" BATON_DIR="$tr" \
+    bash "$SS" <<<"{\"session_id\":\"$sid\",\"cwd\":\"$proj\",\"source\":\"compact\"}" >/dev/null 2>&1
+  local bound; bound=$(jq -r '.workstream' "$tr/terminals/${th}.json" 2>/dev/null)
+  assert "E1-F: deliberate switch survives next SessionStart (stays ckpt)" "[ '$bound' = 'ckpt' ]"
+  rm -f "/tmp/claude-session-tracking-${sid}"; rm -rf "$proj"
+}
+run_e1_switch_survives_ss
 
 echo
 echo "====================================="

@@ -126,6 +126,22 @@ run_cron_prints_crontab_line() {
 }
 run_cron_prints_crontab_line
 
+run_cron_schedule_install_uninstall_match() {
+  # Extract the leading 5-field cron expr from each script's cleanup-cron-wrapper line.
+  local d; d=$(mktemp -d)
+  local inst unin ie ue
+  inst=$(XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR=/tmp/foo bash "$REPO_DIR/tools/install-cron.sh" --dry-run 2>/dev/null | grep -E 'cleanup-cron-wrapper\.sh' | head -1)
+  unin=$(BATON_DIR= XDG_CONFIG_HOME="$d/.config" bash "$REPO_DIR/tools/uninstall.sh" --settings "$d/settings.json" --no-archive 2>/dev/null | grep -E 'cleanup-cron-wrapper\.sh' | head -1)
+  ie=$(printf '%s' "$inst" | grep -oE '^[0-9*/ ]+ ' | head -1 | xargs echo)
+  ue=$(printf '%s' "$unin" | grep -oE '^[0-9*/ ]+ ' | head -1 | xargs echo)
+  assert "cron-schedule-install-nonempty" "[ -n '$ie' ]"
+  assert "cron-schedule-uninstall-nonempty" "[ -n '$ue' ]"
+  assert "cron-schedule-install-eq-uninstall" "[ '$ie' = '$ue' ]"
+  assert "cron-schedule-is-every-2-days" "[ '$ie' = '0 0 */2 * *' ]"
+  rm -rf "$d"
+}
+run_cron_schedule_install_uninstall_match
+
 echo "## uninstall.sh"
 
 run_uninstall_strips_hooks() {
@@ -260,6 +276,40 @@ run_verify_idempotency_check() {
   rm -rf "$d"
 }
 run_verify_idempotency_check
+
+echo "## install/uninstall skills (E2)"
+
+# E2: install.sh copies the kept skills into the target project's .claude/skills/
+run_install_copies_skills() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "E2: install copies baton skill" "[ -f '$d/proj/.claude/skills/baton/SKILL.md' ]"
+  assert "E2: install copies install-baton skill" "[ -f '$d/proj/.claude/skills/install-baton/SKILL.md' ]"
+  # Absence checked via the skills listing (not a literal skills-slash-resume path)
+  # so the no-stranded-command audit gate does not false-positive on this test.
+  assert "E2: install does NOT copy the removed skill" "! ls '$d/proj/.claude/skills' 2>/dev/null | grep -qx resume"
+  # Idempotent re-install: running install again must NOT nest baton/baton
+  # (proves the skip-if-exists guard the plan advertises actually holds).
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "E2: re-install is idempotent (no nested baton/baton)" "[ ! -e '$d/proj/.claude/skills/baton/baton' ]"
+  rm -rf "$d"
+}
+run_install_copies_skills
+
+# E2: uninstall (explicit target) removes the copied skills
+run_uninstall_removes_skills() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  XDG_CONFIG_HOME="$d/.config" HOME="$d" \
+    bash "$REPO_DIR/tools/uninstall.sh" --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "E2: uninstall removes baton skill" "[ ! -e '$d/proj/.claude/skills/baton' ]"
+  assert "E2: uninstall removes install-baton skill" "[ ! -e '$d/proj/.claude/skills/install-baton' ]"
+  rm -rf "$d"
+}
+run_uninstall_removes_skills
 
 echo ""
 echo "====================================="

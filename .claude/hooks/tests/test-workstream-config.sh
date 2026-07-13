@@ -12,21 +12,23 @@ _aeq(){ if [ "$1" = "$2" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf
 
 # threshold (cfg_key=threshold_pct)
 echo '{}' > "$CFG"
-_aeq 23 "$( unset BATON_PCT_THRESHOLD; source "$WL"; checkpoint_threshold )" 'threshold default'
+_aeq 20 "$( source "$WL"; printf '%s' "$BATON_DEFAULT_PCT_THRESHOLD" )" 'canonical constant BATON_DEFAULT_PCT_THRESHOLD is 20'
+_aeq "$( source "$WL"; printf '%s' "$BATON_DEFAULT_PCT_THRESHOLD" )" "$( unset BATON_PCT_THRESHOLD; source "$WL"; checkpoint_threshold )" 'checkpoint_threshold default derives from the constant (single-source)'
+_aeq 20 "$( unset BATON_PCT_THRESHOLD; source "$WL"; checkpoint_threshold )" 'threshold -> default (20)'
 echo '{"threshold_pct":"40"}' > "$CFG"
 _aeq 40 "$( unset BATON_PCT_THRESHOLD; source "$WL"; checkpoint_threshold )" 'threshold from config (legacy lowercase key)'
 _aeq 55 "$( export BATON_PCT_THRESHOLD=55; source "$WL"; checkpoint_threshold )" 'threshold env beats config'
 
-# threshold bounds validation (E-B): invalid / out-of-range -> default 23
+# threshold bounds validation (E-B): invalid / out-of-range -> default 20
 echo '{}' > "$CFG"
-_aeq 23 "$( export BATON_PCT_THRESHOLD=abc; source "$WL"; checkpoint_threshold )" 'threshold non-integer env -> default'
-_aeq 23 "$( export BATON_PCT_THRESHOLD=0;   source "$WL"; checkpoint_threshold )" 'threshold 0 (below range) -> default'
-_aeq 23 "$( export BATON_PCT_THRESHOLD=100; source "$WL"; checkpoint_threshold )" 'threshold 100 (above range) -> default'
-_aeq 23 "$( export BATON_PCT_THRESHOLD=-5;  source "$WL"; checkpoint_threshold )" 'threshold negative -> default'
+_aeq 20 "$( export BATON_PCT_THRESHOLD=abc; source "$WL"; checkpoint_threshold )" 'threshold non-integer env -> default (20)'
+_aeq 20 "$( export BATON_PCT_THRESHOLD=0;   source "$WL"; checkpoint_threshold )" 'threshold 0 (below range) -> default (20)'
+_aeq 20 "$( export BATON_PCT_THRESHOLD=100; source "$WL"; checkpoint_threshold )" 'threshold 100 (above range) -> default (20)'
+_aeq 20 "$( export BATON_PCT_THRESHOLD=-5;  source "$WL"; checkpoint_threshold )" 'threshold negative -> default (20)'
 _aeq 1  "$( export BATON_PCT_THRESHOLD=1;   source "$WL"; checkpoint_threshold )" 'threshold lower bound 1 honored'
 _aeq 99 "$( export BATON_PCT_THRESHOLD=99;  source "$WL"; checkpoint_threshold )" 'threshold upper bound 99 honored'
 echo '{"threshold_pct":"250"}' > "$CFG"
-_aeq 23 "$( unset BATON_PCT_THRESHOLD; source "$WL"; checkpoint_threshold )" 'threshold out-of-range config -> default'
+_aeq 20 "$( unset BATON_PCT_THRESHOLD; source "$WL"; checkpoint_threshold )" 'threshold out-of-range config -> default (20)'
 
 # tracking ttl (seconds = days*86400)
 echo '{}' > "$CFG"

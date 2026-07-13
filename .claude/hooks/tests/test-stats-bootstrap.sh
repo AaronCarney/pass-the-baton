@@ -161,6 +161,10 @@ cuped_theta_len=$(jq '.theta | length' /tmp/cuped_out.json)
 assert 'cuped theta is vector len >= 4' "[ \"$cuped_theta_len\" -ge 4 ]"
 assert 'cuped theta_columns present' "jq -e '.theta_columns | length > 0' /tmp/cuped_out.json >/dev/null 2>&1"
 
+# --- E5 no-magic-numbers: STATS_DEFAULT_SEED named default ---
+_s=$( source "$REPO_ROOT/lib/stats-bootstrap.sh"; printf '%s' "$STATS_DEFAULT_SEED" )
+assert "stats-default-seed-42" "[ '$_s' = '42' ]"
+
 echo ""
 echo "PASS=$PASS FAIL=$FAIL"
 if [ ${#FAILED[@]} -gt 0 ]; then

@@ -67,6 +67,10 @@ assert "subset_size_warning(0.25) is quoted string" "printf '%s' \"\$warn\" | gr
 assert "subset_size_warning(0.25) mentions 30%" "printf '%s' \"\$warn\" | grep -q '30'"
 assert "subset_size_warning(0.25) mentions B11" "printf '%s' \"\$warn\" | grep -q 'B11'"
 
+# === Test: L0 sample floor constant is named and equals 0.30 ===
+_f=$( source "$REPO_ROOT/lib/aggregator-v2.sh"; printf '%s' "${_L0_SAMPLE_FLOOR:-}" )
+assert "l0-sample-floor-030" "[ '$_f' = '0.30' ]"
+
 # === Test: rc=1 on out-of-range ===
 set +e
 aggregator_v2::subset_size_warning 1.5 >/dev/null 2>&1

@@ -23,7 +23,7 @@ Cited: `lib/config.sh:10-40`.
 - **Read by:** `_cfg::get` (the config.json layer of the resolution order above).
 - **Holds:** the runtime knob store. Keys:
   - `template` - active progress template.
-  - `threshold_pct` - checkpoint trigger fill, integer 1-99, default 23. Out-of-range or non-integer values are rejected by the dashboard and the trigger falls back to 23.
+  - `threshold_pct` - checkpoint trigger fill, integer 1-99, default 20. Out-of-range or non-integer values are rejected by the dashboard and the trigger falls back to 20.
   - `display_name` - workstream display name.
   - `templates_dir` - override for the templates directory.
   - `project_context_file` - override for the project-context file path.
@@ -55,6 +55,18 @@ Cited: `lib/config.sh:10-40`.
 
 - Cost-model audit bookkeeping: audit date, cost-model version, per-arm residuals, next-audit-due, and related instrument state.
 - This is **internal measurement-instrument state, not a user-tunable knob.** Do not edit it to change behavior.
+
+## Auto-continue (tmux, opt-in)
+
+`BATON_AUTO_CONTINUE` is **off by default** and does nothing unless the session runs inside tmux. When enabled inside tmux, after a checkpoint save the tool auto-sends `/clear` and a continue nudge into the *same* tmux pane, so you do not have to hand off the next session yourself. It drives this purely through `tmux send-keys` into that pane; it does **not** use PTY/expect or `TIOCSTI`. It fires exactly once per checkpoint, never mid-write, and outside tmux it is a clean no-op.
+
+- `BATON_AUTO_CONTINUE` (default off): set to `1` **and** run inside tmux to enable the behavior above. Any other value, or no tmux, leaves it disabled.
+- `BATON_AUTO_CONTINUE_NUDGE` (default `proceed`): the text sent after `/clear` to start the next session working on the auto-injected progress.
+- `BATON_AUTO_CONTINUE_LOG` (default `${TMPDIR:-/tmp}/baton-auto-continue.log`): once the injector consumes the done-flag it is committed, so every terminal state past that point writes one line here (`continued`, `cleared-not-continued-prompt-timeout`, `fail-clear-send`, and similar). Check it if an auto-continue did not behave as expected.
+
+**Abort:** delete `/tmp/baton-done-<session_id>` during the brief readiness poll before the keys are sent. Unsetting `BATON_AUTO_CONTINUE` in the pane does **not** abort an already-spawned injector - it is a detached process with a frozen environment, so deleting the done-flag is the only mechanism that stops it.
+
+**First use:** idle detection is a best-effort heuristic. Before relying on it, enable it once in your real terminal and confirm `/clear` fires only after a turn ends. The feature is off by default and abortable (delete the done-flag), and every committed action is logged, so a mis-fire is diagnosable.
 
 ## See also
 

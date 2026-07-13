@@ -1,5 +1,5 @@
 #!/bin/bash
-# PreToolUse hook. At the configured threshold (default 23% context fill), marks the session as PENDING,
+# PreToolUse hook. At the configured threshold (default 20% context fill), marks the session as PENDING,
 # lists this terminal's old progress files for archival, and injects the
 # save-progress workflow into Claude's next turn. Once the post-write
 # trigger sets DONE, blocks all further tool calls until /clear.
@@ -26,8 +26,10 @@ _FC_SESSION_ID="$SESSION_ID"
 # below both read this one value, so the trigger and the reported `threshold`
 # can never diverge. checkpoint_threshold (workstream-lib.sh) is bounds-validated;
 # the inline guard keeps the hook safe if the helper is unavailable.
-CC_THRESHOLD=$(checkpoint_threshold 2>/dev/null || echo 23)
-[[ "$CC_THRESHOLD" =~ ^[0-9]+$ ]] || CC_THRESHOLD=23
+CC_THRESHOLD=$(checkpoint_threshold 2>/dev/null || echo "${BATON_DEFAULT_PCT_THRESHOLD:-20}")
+[[ "$CC_THRESHOLD" =~ ^[0-9]+$ ]] || CC_THRESHOLD="${BATON_DEFAULT_PCT_THRESHOLD:-20}"
+
+: "${_HEALTH_WARN_TOOL_CALLS:=20}"   # warn if no context-pct after N tool calls
 
 # Emit PreToolUse envelope exactly once (CC2). Trap on EXIT to cover every
 # early-return path. Failures go to stderr, never alter the hook exit code.
@@ -133,20 +135,20 @@ fi
 PCT=$(cat "/tmp/claude-context-pct-${SESSION_ID}" 2>/dev/null)
 _CC_PCT="$PCT"
 
-# Health check: warn if PCT file missing after 20 tool calls
+# Health check: warn if PCT file missing after $_HEALTH_WARN_TOOL_CALLS tool calls
 if [ -z "$PCT" ]; then
   COUNT_FILE="/tmp/baton-health-${SESSION_ID}"
   COUNT=$(cat "$COUNT_FILE" 2>/dev/null || echo 0)
   COUNT=$((COUNT + 1))
   echo "$COUNT" > "$COUNT_FILE"
   WARNED="/tmp/baton-warned-${SESSION_ID}"
-  if [ "$COUNT" -ge 20 ] && [ ! -f "$WARNED" ]; then
+  if [ "$COUNT" -ge "$_HEALTH_WARN_TOOL_CALLS" ] && [ ! -f "$WARNED" ]; then
     touch "$WARNED"
-    jq -n '{
+    jq -n --arg n "$_HEALTH_WARN_TOOL_CALLS" '{
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "allow",
-        additionalContext: "WARNING: Context percentage not available after 20+ tool calls. The statusline may not be configured. Checkpoint auto-save will not trigger. Consider manual checkpoint if session is long."
+        additionalContext: ("WARNING: Context percentage not available after " + $n + "+ tool calls. The statusline may not be configured. Checkpoint auto-save will not trigger. Consider manual checkpoint if session is long.")
       }
     }'
     exit 0
@@ -181,7 +183,7 @@ SESSIONS_DIR="$(checkpoint_progress_dir "$PROJECT_DIR")"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 # Find workstream - terminals/<term_hash>.json is the v2 source of truth (re-read
-# each fire so /resume rebinds take effect immediately). POINTER → T_FILE is the
+# each fire so a resume/rebind takes effect immediately). POINTER → T_FILE is the
 # v1 fallback for sessions whose terminal record hasn't been populated yet.
 TERM_HASH=$(term_hash)
 TERM_FILE="$TRACKING_DIR/terminals/${TERM_HASH}.json"

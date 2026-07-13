@@ -43,6 +43,7 @@ fi
 rm -f "/tmp/claude-context-pct-${SESSION_ID}"
 rm -f "/tmp/claude-context-triggered-${SESSION_ID}"
 rm -f "/tmp/baton-done-${SESSION_ID}"
+rm -f "/tmp/baton-done-${SESSION_ID}.fired"
 rm -f "/tmp/baton-pending-${SESSION_ID}"
 rm -f "/tmp/baton-archive-${SESSION_ID}"
 rm -f "/tmp/baton-health-${SESSION_ID}"
@@ -53,7 +54,7 @@ rm -f "$T_POINTER"
 DEBUG_LOG="/tmp/claude-ws-debug.log"
 if [ -f "$DEBUG_LOG" ]; then
   SIZE=$(stat -c %s "$DEBUG_LOG" 2>/dev/null || echo 0)
-  if [ "$SIZE" -gt 102400 ]; then
+  if [ "$SIZE" -gt "${_BATON_DEBUG_LOG_MAX_BYTES:-102400}" ]; then
     tail -50 "$DEBUG_LOG" > "${DEBUG_LOG}.tmp" && mv "${DEBUG_LOG}.tmp" "$DEBUG_LOG"
   fi
 fi

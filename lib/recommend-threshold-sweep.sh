@@ -72,7 +72,7 @@ recommend_threshold::sweep() {
     val_count=$(wc -l < "$tmp_vals" | tr -d ' ')
     if [ "$val_count" -gt 1 ]; then
       local bca_out
-      bca_out=$(SEED="${SEED:-42}" stats_bootstrap::bca "$tmp_vals" 2>/dev/null) || bca_out=''
+      bca_out=$(SEED="${SEED:-$STATS_DEFAULT_SEED}" stats_bootstrap::bca "$tmp_vals" 2>/dev/null) || bca_out=''
       if [ -n "$bca_out" ]; then
         ci_json=$(printf '%s' "$bca_out" | jq '{lower: .ci_lower, upper: .ci_upper}')
       fi

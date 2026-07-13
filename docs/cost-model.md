@@ -216,7 +216,7 @@ The hook reads `model` (resolved via `cost_models::resolve_id`) and all five `us
     "fresh_input": 1234,
     "output": 456,
     "turn_index": 17,
-    "threshold": 23,
+    "threshold": 20,
     "summary_turn": false,
     "transcript_basename": "transcript.jsonl"
   }
