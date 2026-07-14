@@ -1,8 +1,8 @@
 #!/bin/bash
 # E-D2 Task 1: plugin packaging manifests.
 # Asserts .claude-plugin/plugin.json + marketplace.json exist with the structure
-# the Claude Code plugin/marketplace loaders require: a versionless plugin.json
-# (commit-SHA versioning) pointing hooks at ./hooks/hooks.json and skills at the
+# the Claude Code plugin/marketplace loaders require: a SemVer-versioned plugin.json
+# (SemVer adopted as of 0.3.0) pointing hooks at ./hooks/hooks.json and skills at the
 # existing ./.claude/skills/ dir, and a single-plugin marketplace.json with a
 # relative self-source ("./") for local install testing.
 #
@@ -36,8 +36,8 @@ assert "plugin.json name == pass-the-baton" \
   "[ \"\$(jq -r .name '$PLUGIN')\" = pass-the-baton ]"
 assert "plugin.json has a non-empty description" \
   "[ -n \"\$(jq -r '.description // empty' '$PLUGIN')\" ]"
-assert "plugin.json OMITS version (commit-SHA versioning)" \
-  "[ \"\$(jq -r 'has(\"version\")' '$PLUGIN')\" = false ]"
+assert "plugin.json has a SemVer version (adopted as of 0.3.0)" \
+  "[[ \"\$(jq -r '.version // empty' '$PLUGIN')\" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]"
 assert "plugin.json hooks -> ./hooks/hooks.json" \
   "[ \"\$(jq -r '.hooks' '$PLUGIN')\" = './hooks/hooks.json' ]"
 assert "plugin.json skills -> ./.claude/skills/" \

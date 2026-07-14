@@ -29,7 +29,7 @@ These four hooks define the persistence and routing behavior. Their script paths
 | `PreToolUse` (`context-checkpoint.sh`) | Before any tool call | Resolves the trigger threshold via `checkpoint_threshold` (env `BATON_PCT_THRESHOLD` > `config.json` `threshold_pct` > default 20); flags the terminal's workstream as `pending` on threshold cross. Once per session, then defers. |
 | `PostToolUse` (`checkpoint-write-trigger.sh`, matcher `Write\|Edit\|MultiEdit`) | After progress-file writes | Atomically updates `workstreams/<ws>.json` under `flock` when a progress file is written while the pending flag is set. Archives the previously-bound progress file. |
 | `SessionStart` (`session-start.sh`) | Session boot (matchers: `startup`, `resume`, `clear`, `compact`) | Injects the bound progress file as a mandatory directive when a terminal binding exists (no-op otherwise). In the main session, when event collection is on, also runs one adaptive-tuner control cycle and emits a `tuner_snapshot` event - inert under the placeholder scoring function. |
-| `UserPromptSubmit` (`project-detect.sh`) | Every user prompt | Detects project mentions and explicit `rename this session to X` patterns; updates `workstreams/<ws>.json` `display_name`. CC8: never captures prompt text in event log. |
+| `UserPromptSubmit` (`project-detect.sh`) | Every user prompt | Detects project mentions and explicit `rename this session to X` patterns; updates `workstreams/<ws>.json` `display_name`. A bare project mention rebinds the terminal to an existing same-named workstream **only when the current workstream is fresh** (never checkpointed); an established terminal keeps its binding and emits a `WORKSTREAM=<target> claude` switch hint. Explicit `WORKSTREAM=` over the co-tenancy cap soft-overrides with a warning; a bare mention over the cap is hard-blocked. CC8: never captures prompt text in event log. |
 
 **Commitment:** These four hook script paths and their invocation contract (hook event, matcher pattern, input source, side-effect surface) are semver-protected. Renaming a script, changing its hook event, changing its matcher, or changing its input/output contract is a major-version break.
 
@@ -57,7 +57,7 @@ All user-tunable configuration is exposed via `BATON_*` environment variables. T
 The documented set covers:
 
 - Location knobs (`BATON_DIR`, `BATON_PROGRESS_DIR`, `BATON_ARCHIVE_DIR`, `BATON_PROJECT_DIR`).
-- Behavior knobs (`BATON_PCT_THRESHOLD`).
+- Behavior knobs (`BATON_PCT_THRESHOLD`, `BATON_MAX_TERMINALS_PER_WORKSTREAM` - opt-in co-tenancy cap, default 0 = unlimited).
 - Retention knobs (`BATON_WORKSTREAM_TTL_DAYS`, `BATON_TRACKING_TTL_DAYS`).
 - Display knobs (`BATON_DISPLAY_NAME`).
 - Event-log knobs (`BATON_COLLECT`, `BATON_EVENT_LOG`, `BATON_EVENT_LOG_DISABLE`).
@@ -74,7 +74,7 @@ The documented set covers:
 The two on-disk state files are stable contracts:
 
 - `$BATON_DIR/workstreams/<name>.json` - workstream record (progress file pointer, display name, phase).
-- `$BATON_DIR/terminals/<hash>.json` - per-terminal binding to a workstream.
+- `$BATON_DIR/terminals/<hash>.json` - per-terminal binding to a workstream. Carries an additive optional `.closed_at` field, stamped on a clean SessionEnd (present = the terminal left cleanly; absent = live).
 
 Schemas are documented in [`docs/context-baton.md`](context-baton.md#state-layout) and are not duplicated here. What is stable:
 

@@ -1737,7 +1737,10 @@ run_e1_switch_survives_ss() {
   source "$HOOKS_DIR/lib/workstream-lib.sh"
   local sid="sid-e1switch-$$"
   # Bound pre-switch ws "cur" carries the live session_id; "ckpt" is the switch target.
-  jq -n --arg sid "$sid" '{workstream:"cur", display_name:"alpha", progress_file:"", phase:"impl", updated_at:"2026-07-11T00:00:00Z", session_id:$sid}' > "$tr/workstreams/cur.json"
+  # "cur" MUST be fresh (progress_file:"" AND phase:"unknown") so the co-tenancy rebind-gate
+  # permits the bare-mention switch; an established "cur" now stays put (covered by
+  # test-rebind-gate.sh case A). This case regression-tests the session_id stamp-MOVE.
+  jq -n --arg sid "$sid" '{workstream:"cur", display_name:"alpha", progress_file:"", phase:"unknown", updated_at:"2026-07-11T00:00:00Z", session_id:$sid}' > "$tr/workstreams/cur.json"
   jq -n '{workstream:"ckpt", display_name:"baton", progress_file:"", phase:"impl", updated_at:"2026-07-10T00:00:00Z"}' > "$tr/workstreams/ckpt.json"
   local th; th=$(USER=u CLAUDE_TERMINAL_ID=SwTerm term_hash)
   jq -n '{terminal_id:"SwTerm", workstream:"cur", updated_at:"2026-07-11T00:00:00Z"}' > "$tr/terminals/${th}.json"

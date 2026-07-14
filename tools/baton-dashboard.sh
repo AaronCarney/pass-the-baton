@@ -35,6 +35,7 @@ _show() {
   printf '  %-32s %-40s %s\n' 'template:'              "$template" '[config-only]'
   printf '  %-32s %-40s %s\n' 'threshold_pct:'         "$(_cfg::get BATON_PCT_THRESHOLD "$BATON_DEFAULT_PCT_THRESHOLD" threshold_pct)" "$(_src BATON_PCT_THRESHOLD threshold_pct)"
   printf '  %-32s %-40s %s\n' 'display_name:'          "$(_cfg::get BATON_DISPLAY_NAME '' display_name)" "$(_src BATON_DISPLAY_NAME display_name)"
+  printf '  %-32s %-40s %s\n' 'max_terminals_per_workstream:' "$(_cfg::get BATON_MAX_TERMINALS_PER_WORKSTREAM "$BATON_DEFAULT_MAX_TERMINALS" max_terminals_per_workstream)" "$(_src BATON_MAX_TERMINALS_PER_WORKSTREAM max_terminals_per_workstream)"
   printf '  %-32s %-40s %s\n' 'templates_dir:'         "$(jq -r '.templates_dir // empty' "$CFG" 2>/dev/null)" '[config-only]'
   printf '  %-32s %-40s %s\n' 'project_context_file:'  "$(jq -r '.project_context_file // empty' "$CFG" 2>/dev/null)" '[config-only]'
   printf '\n[Paths]\n'
@@ -118,6 +119,9 @@ _set_one() {
     BATON_WORKSTREAM_TTL_DAYS|BATON_TRACKING_TTL_DAYS|BATON_TMP_TTL_HOURS)
       [[ "$value" =~ ^[0-9]+$ ]] || { echo "Error: $key must be a non-negative integer" >&2; return 1; }
       ;;
+    max_terminals_per_workstream)
+      [[ "$value" =~ ^[0-9]+$ ]] || { echo "max_terminals_per_workstream must be a non-negative integer" >&2; return 1; }
+      ;;
     BATON_TIMING|BATON_OUTCOME_PROXIES|BATON_PREWARM|BATON_EVENT_LOG_DISABLE|BATON_COLLECT)
       case "$value" in 0|1) ;; *) echo "Error: $key must be 0 or 1" >&2; return 1;; esac
       ;;
@@ -131,7 +135,7 @@ _set_one() {
     *)
       cat >&2 <<'EOF'
 Error: unknown key. Valid keys:
-  [Existing]   template, threshold_pct, display_name, templates_dir, project_context_file
+  [Existing]   template, threshold_pct, display_name, templates_dir, project_context_file, max_terminals_per_workstream
   [Paths]      BATON_DIR, BATON_PROGRESS_DIR, BATON_ARCHIVE_DIR, BATON_PROJECT_DIR
   [TTLs]       BATON_WORKSTREAM_TTL_DAYS, BATON_TRACKING_TTL_DAYS, BATON_TMP_TTL_HOURS
   [Opt-ins]    BATON_COLLECT, BATON_TIMING, BATON_OUTCOME_PROXIES, BATON_PREWARM, BATON_EVENT_LOG_DISABLE
@@ -146,7 +150,7 @@ EOF
   # Single config write path (E-C): the atomic flock+jq write now lives in lib/config.sh
   # so the dashboard and the threshold tuner cannot drift. threshold_pct is the one numeric key.
   case "$key" in
-    threshold_pct) _cfg::set "$key" "$value" number ;;
+    threshold_pct|max_terminals_per_workstream) _cfg::set "$key" "$value" number ;;
     *)             _cfg::set "$key" "$value" ;;
   esac
 }

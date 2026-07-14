@@ -351,6 +351,40 @@ workstream_in_use() {
   return 1
 }
 
+# workstream_roster <tracking> <ws> [exclude_hash] - print, one per line, the term_hash of
+# every FRESH terminal bound to <ws>: updated_at within TTL and no .closed_at. Skips
+# exclude_hash (the caller's own hash) when given.
+workstream_roster() {
+  local tracking="$1" ws="$2" excl="${3:-}"
+  local now cutoff ttl f base
+  now=$(date -u +%s); ttl=$(workstream_ttl_seconds); cutoff=$((now - ttl))
+  for f in "$tracking/terminals"/*.json; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f" .json)
+    [ -n "$excl" ] && [ "$base" = "$excl" ] && continue
+    [ "$(jq -r '.workstream // empty' "$f" 2>/dev/null)" = "$ws" ] || continue
+    [ -n "$(jq -r '.closed_at // empty' "$f" 2>/dev/null)" ] && continue
+    local e; e=$(parse_iso8601 "$(jq -r '.updated_at // empty' "$f" 2>/dev/null)")
+    [ "$e" -ge "$cutoff" ] && printf '%s\n' "$base"
+  done
+}
+
+# workstream_terminal_count <tracking> <ws> [exclude_hash] - number of fresh co-tenants.
+workstream_terminal_count() {
+  workstream_roster "$1" "$2" "${3:-}" | grep -c . || true
+}
+
+# workstream_is_fresh <ws_file> - exit 0 iff the workstream has never been checkpointed
+# (progress_file empty AND phase unknown). Missing/corrupt file -> not fresh (return 1).
+workstream_is_fresh() {
+  local wf="$1"
+  [ -f "$wf" ] || return 1
+  local pf ph
+  pf=$(jq -r '.progress_file // empty' "$wf" 2>/dev/null) || return 1
+  ph=$(jq -r '.phase // empty' "$wf" 2>/dev/null)
+  [ -z "$pf" ] && [ "$ph" = "unknown" ]
+}
+
 # archive_workstream <tracking_dir> <archive_base> <ws_file>
 # Holds flock on workstreams/<ws>.json.lock across the move (consistent with
 # checkpoint-write-trigger.sh:108-127). Collision-safe: if dest exists, .1 .2 ...

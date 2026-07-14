@@ -181,10 +181,26 @@ if [ -n "${WORKSTREAM:-}" ]; then
       '{workstream:$ws, display_name:$dn, progress_file:"", phase:"unknown", updated_at:$ts, project_dir:$pd}' \
       | atomic_write "$WS_PATH"
   fi
+  # Soft cap: warn (never block) when the explicitly-named workstream is over cap.
+  # Hold ${WS_PATH}.lock across count+bind ONLY when the cap is on, so concurrent
+  # explicit joins count-then-bind atomically and warn deterministically.
+  _cap=$(_cfg::get BATON_MAX_TERMINALS_PER_WORKSTREAM "${BATON_DEFAULT_MAX_TERMINALS:-0}" max_terminals_per_workstream)
+  [[ "$_cap" =~ ^[0-9]+$ ]] || _cap=0
+  _capped=0
+  if [ "$_cap" -gt 0 ] && [ -z "${AGENT_SESSION_ID:-}" ]; then
+    exec 9>"${WS_PATH}.lock"; flock 9; _capped=1
+    _n=$(workstream_terminal_count "$TRACKING" "$WORKSTREAM" "$TH")
+    if [ "$_n" -ge "$_cap" ]; then
+      echo "WARNING: workstream '$WORKSTREAM' is at its max of $_cap terminal(s); attaching anyway (explicit WORKSTREAM= override)."
+      echo ""
+    fi
+  fi
+  # --- existing UNCONDITIONAL terminal bind (:184-187), unchanged, runs in every path ---
   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   jq -n --arg tid "$TS" --arg ws "$WORKSTREAM" --arg ts "$NOW" \
     '{terminal_id:$tid, workstream:$ws, updated_at:$ts}' \
     | atomic_write "$TERM_FILE"
+  [ "$_capped" -eq 1 ] && { flock -u 9; exec 9>&-; }
 fi
 
 # Register parent session_id for subagent checkpoint lookup
@@ -311,11 +327,18 @@ fi
 _tmux_pane=""
 [ -n "${TMUX:-}" ] && _tmux_pane="${TMUX_PANE:-}"
 jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg pane "$_tmux_pane" \
-  '.updated_at = $ts | (if $pane == "" then del(.tmux_pane) else .tmux_pane = $pane end)' "$TERM_FILE" \
+  '.updated_at = $ts | del(.closed_at) | (if $pane == "" then del(.tmux_pane) else .tmux_pane = $pane end)' "$TERM_FILE" \
   | atomic_write "$TERM_FILE"
 
 # List other active workstreams so user can see/switch
 if [ -z "${AGENT_SESSION_ID:-}" ]; then
+  _roster_now=$(workstream_roster "$TRACKING" "$WS_NAME" "$TH" | sort | tr '\n' ',')
+  _cnt=$(printf '%s' "$_roster_now" | tr ',' '\n' | grep -c . || true)
+  if [ "$_cnt" -ge 1 ]; then
+    echo "NOTE: $_cnt other terminal(s) are attached to this workstream ('${WS_DISPLAY:-$WS_NAME}'). Checkpoints are shared - last writer wins."
+    echo ""
+  fi
+  printf '%s' "$_roster_now" | atomic_write "$TRACKING/terminals/${TH}.roster"
   OTHERS=""
   for f in "$TRACKING"/workstreams/*.json; do
     [ -f "$f" ] || continue

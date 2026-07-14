@@ -59,4 +59,13 @@ if [ -f "$DEBUG_LOG" ]; then
   fi
 fi
 
+# Stamp .closed_at on THIS terminal's binding so the roster drops it immediately
+# (the binding file itself is preserved for relaunch re-bind; session-start clears
+# .closed_at when the terminal re-binds).
+TH=$(term_hash)
+TERM_FILE="$TRACKING_DIR/terminals/${TH}.json"
+if [ -f "$TERM_FILE" ]; then
+  jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.closed_at = $ts' "$TERM_FILE" | atomic_write "$TERM_FILE"
+fi
+
 exit 0

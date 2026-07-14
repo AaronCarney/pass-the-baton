@@ -8,6 +8,21 @@ All notable changes to Pass the Baton are documented here. The format is based o
 
 ---
 
+## [0.3.1] - 2026-07-13
+
+The "co-tenancy safety" release: a bare project mention no longer hijacks an established terminal, attached terminals are surfaced instead of silent, and an opt-in cap bounds how many terminals share a workstream.
+
+### Added
+
+- **Opt-in co-tenancy cap** `max_terminals_per_workstream` (env `BATON_MAX_TERMINALS_PER_WORKSTREAM`, default `0` = unlimited): caps how many terminals may auto-join a single workstream. A bare project mention over the cap is hard-blocked; an explicit `WORKSTREAM=` over the cap soft-overrides with a warning.
+- **Roster visibility**: SessionStart injects a snapshot NOTE when more than one terminal is attached to a workstream, and SessionStart/UserPromptSubmit surface a set-diff notice when the attached set changes, so a co-tenant is never silent. Terminal records now carry an additive optional `.closed_at` stamp written on a clean exit (present = left cleanly, absent = live), enabling prompt-time leave-detection.
+
+### Changed
+
+- **Bare project mention no longer force-rebinds an established terminal.** A bare mention now rebinds the terminal to an existing same-named workstream only when the current workstream is fresh (never checkpointed); an established terminal keeps its binding and prints a `WORKSTREAM=<target> claude` switch hint instead of silently switching.
+
+---
+
 ## [0.3.0] - 2026-07-12
 
 The "friction-free continuity" release: crash recovery, same-terminal auto-continue, an honest settings dashboard, and every checkpoint policy value single-sourced.

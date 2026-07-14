@@ -115,9 +115,15 @@ does this terminal belong to."
 {
   "terminal_id": "<CLAUDE_TERMINAL_ID-or-tty>",
   "workstream": "main-20260509-131955-653278",
-  "updated_at": "2026-05-09T13:30:00Z"
+  "updated_at": "2026-05-09T13:30:00Z",
+  "closed_at": "2026-05-09T14:05:00Z"
 }
 ```
+
+`closed_at` is an **additive optional** field: present once the terminal exits
+cleanly (stamped by the SessionEnd hook), absent while the terminal is live.
+Prompt-time leave-detection reads it to tell an attached co-tenant apart from
+one that has already left; consumers must treat an absent `closed_at` as "live".
 
 The `terminal_id` field stores the *source* string (`CLAUDE_TERMINAL_ID`, or
 the tty / parent-shell tty fallback). The filename `terminals/<term_hash>.json`
@@ -159,6 +165,21 @@ A terminal's binding lives only in `terminals/<term_hash>.json`. To change it:
   workstream, rewrite the binding in `terminals/<term_hash>.json` to point at
   the target workstream id; the next checkpoint write picks up the new binding.
 
+`WORKSTREAM=<name> claude` at launch is the supported explicit switch.
+
+### Co-tenancy
+
+Multiple terminals may attach to the same workstream. SessionStart injects a
+roster snapshot NOTE when more than one terminal is attached, and
+UserPromptSubmit surfaces a set-diff notice when the attached set changes -
+so a co-tenant is always visible, never silent. `max_terminals_per_workstream`
+(env `BATON_MAX_TERMINALS_PER_WORKSTREAM`, default 0 = unlimited) caps
+accidental auto-joins: a **bare project mention** over the cap is hard-blocked,
+while an **explicit `WORKSTREAM=`** over the cap soft-overrides with a warning
+(the explicit request wins). The shared workstream record holds a single
+progress pointer, so concurrent co-tenant checkpoints are **last-writer-wins** -
+the last checkpoint to write the record owns the pointer.
+
 ## Project Arcs (cost envelopes)
 
 A marked run (`tools/project.sh mark-start <slug> [--method LABEL]` →
@@ -198,6 +219,7 @@ checkpoint or a resume.
 | `BATON_ARCHIVE_DIR` | `$HOME/.local/share/baton` | Where archived (>7d-idle) workstreams move. |
 | `BATON_PROJECT_DIR` | `$PWD` at install time | Project root for cron (cron has no `$PWD`). |
 | `BATON_PCT_THRESHOLD` | `20` | Percent context-fill trigger. Resolved **env var > `config.json` `threshold_pct` > default 20** by `workstream-lib.sh::checkpoint_threshold`, then bounds-checked: an integer in **1-99** is honored, anything else falls back to 20. Both the gate (`context-checkpoint.sh:66,158`) and the telemetry `threshold` field read through that one function, so changing this var (or `threshold_pct` in config) moves the actual trigger. |
+| `BATON_MAX_TERMINALS_PER_WORKSTREAM` | `0` | Opt-in co-tenancy cap: max terminals that may auto-join one workstream. `0` = unlimited. Bare-mention auto-joins over the cap are hard-blocked; an explicit `WORKSTREAM=` over the cap soft-overrides with a warning. |
 | `BATON_WORKSTREAM_TTL_DAYS` | `30` | Days before a workstream record is archived. |
 | `BATON_TRACKING_TTL_DAYS` | `7` | Days before a per-session tracking pointer is reaped. |
 | `BATON_TMP_TTL_HOURS` | `24` | Age before `/tmp` stragglers are swept by the cleanup cron. |

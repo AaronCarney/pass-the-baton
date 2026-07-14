@@ -61,6 +61,19 @@ WS_FILE="$TRACKING/workstreams/${CURRENT_WS}.json"
 [ -f "$WS_FILE" ] || exit 0
 EXISTING_NAME=$(jq -r '.display_name // empty' "$WS_FILE")
 
+# Roster-diff notify: if the set of fresh co-tenants on the current workstream
+# changed since this terminal's last prompt, print a one-line notice. Sidecar is
+# per-terminal (.roster) under the tracking dir. Runs on every prompt.
+_th=$(term_hash)
+_roster_now=$(workstream_roster "$TRACKING" "$CURRENT_WS" "$_th" | sort | tr '\n' ',')
+_roster_file="$TRACKING/terminals/${_th}.roster"
+_roster_prev=$(cat "$_roster_file" 2>/dev/null || echo "")
+if [ "$_roster_now" != "$_roster_prev" ] && [ -n "$_roster_now$_roster_prev" ]; then
+  _cnt=$(printf '%s' "$_roster_now" | tr ',' '\n' | grep -c . || true)
+  echo "[baton] Workstream '$EXISTING_NAME' roster changed: $_cnt other terminal(s) now attached."
+  printf '%s' "$_roster_now" > "$_roster_file"
+fi
+
 # Match prompt against project symlinks (lowercased word match)
 MATCHED_PROJECT=""
 for link in "$PROJECT_DIR"/projects/*/; do
@@ -148,6 +161,26 @@ else
   done
 
   if [ -n "$TARGET_WS" ]; then
+    # Rebind-gate: only auto-switch a FRESH terminal. An established terminal stays put.
+    if ! workstream_is_fresh "$WS_FILE"; then
+      echo "[baton] Staying on '$EXISTING_NAME'. To switch, relaunch with: WORKSTREAM=$TARGET_WS claude"
+      exit 0
+    fi
+    # Cap: refuse the rebind if the target workstream is already full. A malformed
+    # env override degrades to unlimited (0) instead of leaking a `[: integer
+    # expression expected` line each prompt, mirroring checkpoint_threshold.
+    _cap=$(_cfg::get BATON_MAX_TERMINALS_PER_WORKSTREAM "${BATON_DEFAULT_MAX_TERMINALS:-0}" max_terminals_per_workstream)
+    [[ "$_cap" =~ ^[0-9]+$ ]] || _cap=0
+    # Count-then-rebind is intentionally lock-free (best-effort): bare-mention
+    # rebinds are human-paced, and lossless parallel co-tenancy is deferred.
+    if [ "$_cap" -gt 0 ]; then
+      _th=$(term_hash)
+      _n=$(workstream_terminal_count "$TRACKING" "$TARGET_WS" "$_th")
+      if [ "$_n" -ge "$_cap" ]; then
+        echo "[baton] '$MATCHED_PROJECT' is at its max of $_cap terminal(s); staying on '$EXISTING_NAME'. Relaunch with WORKSTREAM=$TARGET_WS claude to override."
+        exit 0
+      fi
+    fi
     rebind_terminal "$TRACKING" "$TARGET_WS"
     # Bump the rebound workstream so it stays the freshest match next time, and
     # move the session_id stamp onto it. Any path that rebinds a terminal MUST

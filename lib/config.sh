@@ -10,6 +10,10 @@
 # to 20 (directive 2026-07-11); the user-facing knob stays BATON_PCT_THRESHOLD.
 BATON_DEFAULT_PCT_THRESHOLD=20
 
+# Co-tenancy cap: max concurrent terminals per workstream. 0 = unlimited (opt-in,
+# off by default so it is non-breaking). cap=1 documents solo-only.
+BATON_DEFAULT_MAX_TERMINALS=0
+
 _cfg::path() {
   printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
 }
@@ -107,3 +111,4 @@ export -f _cfg::source 2>/dev/null || true
 # silently skips config.json. (CC6 code-review hardening.)
 export -f _cfg::path 2>/dev/null || true
 export BATON_DEFAULT_PCT_THRESHOLD 2>/dev/null || true
+export BATON_DEFAULT_MAX_TERMINALS 2>/dev/null || true
