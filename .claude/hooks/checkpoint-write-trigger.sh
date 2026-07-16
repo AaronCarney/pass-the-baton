@@ -23,6 +23,43 @@ source "$SCRIPT_DIR/lib/template-resolve.sh"   # tpl::resolve_active_template
 source "$SCRIPT_DIR/lib/lints.sh"               # lint::v1/v7/v8
 source "$SCRIPT_DIR/lib/rolloff.sh"             # rolloff::dispatch
 
+# E6: source the shared config resolver + the auto-continue driver selector.
+# Self-contained: guard-source lib/config.sh; if unreachable, define FAITHFUL inline
+# fallbacks so a dashboard config.json write is still honored under plugin
+# distribution. Precedent: session-start.sh:23-32. The fallback MUST match
+# lib/config.sh's precedence exactly - a drift here is a silent behavior fork.
+# --- BEGIN cfg-guard ---
+if ! declare -F _cfg::auto_continue_mode >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lib/config.sh" 2>/dev/null || true
+fi
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  _cfg::get() {
+    local v; v="${!1:-}"
+    if [ -n "$v" ]; then printf '%s' "$v"; return 0; fi
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
+    local ck="${3:-$1}"
+    if [ -f "$cfg" ]; then
+      v="$(jq -r --arg k "$ck" '.[$k] // empty' "$cfg" 2>/dev/null || true)"
+      if [ -n "$v" ] && [ "$v" != 'null' ]; then printf '%s' "$v"; return 0; fi
+    fi
+    printf '%s' "${2:-}"
+  }
+fi
+if ! declare -F _cfg::auto_continue_mode >/dev/null 2>&1; then
+  : "${BATON_DEFAULT_AUTO_CONTINUE_MODE:=off}"
+  _cfg::auto_continue_mode() {
+    local m legacy_default="$BATON_DEFAULT_AUTO_CONTINUE_MODE"
+    [ "${BATON_AUTO_CONTINUE:-0}" = "1" ] && legacy_default=tmux
+    m=$(_cfg::get BATON_AUTO_CONTINUE_MODE "$legacy_default" auto_continue_mode)
+    case "$m" in
+      tmux|relaunch|off) printf '%s' "$m" ;;
+      *) printf '%s' "$BATON_DEFAULT_AUTO_CONTINUE_MODE" ;;
+    esac
+  }
+fi
+# --- END cfg-guard ---
+
 # Wall-clock start for duration_ms in the envelope.
 _WT_START_MS=$(date +%s%3N 2>/dev/null || echo 0)
 # BSD date leaves +%3N literal; numeric-guard so the duration arithmetic below
@@ -245,7 +282,7 @@ touch "$DONE_FLAG"
 # spawn and the injector's first poll-until-idle correctly waits for THIS turn to
 # end before sending /clear. Moving the spawn to a Stop/idle hook would make the
 # pane already-idle at spawn and fire /clear prematurely - do not relocate it.
-if [ "${BATON_AUTO_CONTINUE:-0}" = "1" ] && [ -n "${TMUX:-}" ]; then
+if [ "$(_cfg::auto_continue_mode)" = "tmux" ] && [ -n "${TMUX:-}" ]; then
   _AC_PANE=""
   [ -f "$TERM_FILE" ] && _AC_PANE=$(jq -r '.tmux_pane // empty' "$TERM_FILE" 2>/dev/null)
   if [ -n "$_AC_PANE" ]; then

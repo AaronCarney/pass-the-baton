@@ -1,6 +1,6 @@
 #!/bin/bash
-# E-D2 Task 2: hooks/hooks.json must register EXACTLY the 10 canonical hook
-# wirings that the installers produce (merge-settings.sh 7 core + install.sh 3
+# E-D2 Task 2: hooks/hooks.json must register EXACTLY the 11 canonical hook
+# wirings that the installers produce (merge-settings.sh 8 core + install.sh 3
 # telemetry), each command routed through ${CLAUDE_PLUGIN_ROOT} and referencing a
 # bundled .claude/hooks/<name>.sh file.
 #
@@ -28,9 +28,10 @@ assert() {
 }
 
 # Canonical EXPECTED wiring: [event, matcher, script-basename] triples.
-# 7 core (merge-settings.sh EVENTS/MATCHERS/COMMANDS) + 3 telemetry (install.sh).
+# 8 core (merge-settings.sh EVENTS/MATCHERS/COMMANDS) + 3 telemetry (install.sh).
 EXPECTED_TRIPLES=(
   '["PostToolBatch","","post-tool-batch.sh"]'
+  '["Stop","","stop-relaunch-trigger.sh"]'
   '["PostToolUse","Bash","outcome-proxy-code-execution.sh"]'
   '["PostToolUse","Write|Edit|MultiEdit","checkpoint-write-trigger.sh"]'
   '["PostToolUse","","tool-timing.sh"]'
@@ -72,9 +73,9 @@ if [ "$ACTUAL_SORTED" != "$EXPECTED_SORTED" ]; then
   echo "    --- actual ---";   echo "$ACTUAL_SORTED"   | sed 's/^/    /'
 fi
 
-# Registration count is exactly 10.
+# Registration count is exactly 11.
 COUNT="$(jq '[.hooks[][] | .hooks[]] | length' "$HOOKS_JSON")"
-assert "registration count is exactly 10" '[ "$COUNT" = 10 ]'
+assert "registration count is exactly 11" '[ "$COUNT" = 11 ]'
 
 # Every command uses ${CLAUDE_PLUGIN_ROOT} and references an existing bundled file.
 ALL_CMDS="$(jq -r '.hooks[][] | .hooks[] | .command' "$HOOKS_JSON")"

@@ -89,6 +89,7 @@ SWEEP_PATTERNS=(
   'baton-warned-*'
   'baton-health-*'
   'baton-done-*'
+  'baton-relaunch-*'
   'baton-pending-*'
   'baton-archive-*'
   'claude-subagent-checkpoint-*'

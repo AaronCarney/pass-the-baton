@@ -8,6 +8,22 @@ All notable changes to Pass the Baton are documented here. The format is based o
 
 ---
 
+## [0.3.2] - 2026-07-16
+
+The "clean resumes" release: a second, tmux-free way to hand off between checkpointed sessions, and `claude --resume` no longer replays a checkpoint over a transcript that already has it.
+
+### Added
+
+- **Fresh-relaunch auto-continue driver** (opt-in, off by default): a second way to hand off between checkpointed sessions, alongside the existing tmux driver - neither is the default, pick whichever fits. Launch `tools/baton-run.sh` instead of `claude` (args pass through) and set `BATON_AUTO_CONTINUE_MODE=relaunch`; after a checkpoint the session exits at the turn boundary and a fresh `claude` starts in the same terminal with the progress file re-injected - no tmux, no keystroke injection. A wrapper is required because no hook can end a session from the inside. Bounded by `BATON_RELAUNCH_MAX` (default `10`) and audited to `BATON_RELAUNCH_LOG`. See `docs/configuration.md`.
+- **`BATON_AUTO_CONTINUE_MODE`** (`off`|`tmux`|`relaunch`, default `off`) selects the auto-continue driver; settable via `baton-dashboard.sh set auto_continue_mode=...`. An unrecognized value resolves to `off` so a typo cannot arm a driver. **`BATON_AUTO_CONTINUE=1` continues to mean tmux, unchanged**, for anyone who has not set a mode.
+
+### Fixed
+
+- **`claude --resume` no longer re-injects the progress file.** Resuming a session restores its full transcript, so injecting the checkpoint on top of it replayed stale instructions the session had already moved past. SessionStart now injects only on the `startup`/`clear` paths and prints a one-line note on `resume`, where the context is already present.
+- The per-checkpoint `.relaunch-fired` marker is now swept on session exit, so it cannot outlive its checkpoint.
+
+---
+
 ## [0.3.1] - 2026-07-13
 
 The "co-tenancy safety" release: a bare project mention no longer hijacks an established terminal, attached terminals are surfaced instead of silent, and an opt-in cap bounds how many terminals share a workstream.

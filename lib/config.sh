@@ -14,6 +14,11 @@ BATON_DEFAULT_PCT_THRESHOLD=20
 # off by default so it is non-breaking). cap=1 documents solo-only.
 BATON_DEFAULT_MAX_TERMINALS=0
 
+# E6 auto-continue driver selector: off|tmux|relaunch. The SOLE 'off' literal -
+# _cfg::auto_continue_mode reads this both as its legacy default seed and as its
+# unrecognized-value fallthrough, so the shown value can never disagree with the gate.
+BATON_DEFAULT_AUTO_CONTINUE_MODE=off
+
 _cfg::path() {
   printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
 }
@@ -48,6 +53,23 @@ _cfg::get() {
   fi
   # 3. default.
   printf '%s' "$default"
+}
+
+# E6 driver selector. Two drivers exist (tmux injection, fresh relaunch) and are
+# mutually exclusive. Legacy BATON_AUTO_CONTINUE=1 maps to `tmux` so the shipped
+# contract is preserved: it acts as a DEFAULT, consulted only when no mode is set
+# at any layer. An unrecognized value resolves to `off` - a typo must never arm a
+# driver. Threading the legacy flag in as _cfg::get's DEFAULT arg (rather than
+# checking it afterwards) is what makes env > config.json > legacy-flag > compiled
+# -default fall out of the existing resolver instead of being re-implemented.
+_cfg::auto_continue_mode() {
+  local m legacy_default="$BATON_DEFAULT_AUTO_CONTINUE_MODE"
+  [ "${BATON_AUTO_CONTINUE:-0}" = "1" ] && legacy_default=tmux
+  m=$(_cfg::get BATON_AUTO_CONTINUE_MODE "$legacy_default" auto_continue_mode)
+  case "$m" in
+    tmux|relaunch|off) printf '%s' "$m" ;;
+    *) printf '%s' "$BATON_DEFAULT_AUTO_CONTINUE_MODE" ;;
+  esac
 }
 
 _cfg::source() {
@@ -106,9 +128,11 @@ _cfg::set() {
 export -f _cfg::get 2>/dev/null || true
 export -f _cfg::set 2>/dev/null || true
 export -f _cfg::source 2>/dev/null || true
+export -f _cfg::auto_continue_mode 2>/dev/null || true
 # Export the dependency too: _cfg::get calls _cfg::path internally, so a child
 # process inheriting the exported _cfg::get must also inherit _cfg::path or it
 # silently skips config.json. (CC6 code-review hardening.)
 export -f _cfg::path 2>/dev/null || true
 export BATON_DEFAULT_PCT_THRESHOLD 2>/dev/null || true
 export BATON_DEFAULT_MAX_TERMINALS 2>/dev/null || true
+export BATON_DEFAULT_AUTO_CONTINUE_MODE 2>/dev/null || true

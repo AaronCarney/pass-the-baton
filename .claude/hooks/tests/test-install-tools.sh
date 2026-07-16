@@ -24,11 +24,36 @@ run_merge_fresh() {
   local d; d=$(mktemp -d)
   bash "$REPO_DIR/tools/merge-settings.sh" "$d/settings.json"
   local count
-  count=$(jq '.hooks | [.SessionStart, .PreToolUse, .PostToolUse, .SessionEnd, .UserPromptSubmit] | map(length) | add' "$d/settings.json")
-  assert "MERGE-FRESH: 7 hook entries inserted into new file" "[ '$count' = '7' ]"
+  count=$(jq '.hooks | [.SessionStart, .PreToolUse, .PostToolUse, .SessionEnd, .UserPromptSubmit, .Stop] | map(length) | add' "$d/settings.json")
+  assert "MERGE-FRESH: 8 hook entries inserted into new file" "[ '$count' = '8' ]"
+  # A count is not enough: map(length)|add counts ENTRIES PER EVENT, so a Stop row
+  # paired with the wrong command (typo, or EVENTS/MATCHERS/COMMANDS drifted out of
+  # index alignment) still yields exactly one .Stop entry and the count passes at 8.
+  # test-plugin-hooks-parity.sh cannot cover this - it reads hooks/hooks.json ONLY,
+  # never merge-settings.sh - so without this the installed-settings path (the one
+  # real installs use) would have no content gate at all. Mirrors the command/file
+  # check that parity test already does for the plugin path.
+  local cmd
+  cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$d/settings.json")
+  assert "MERGE-FRESH: Stop command references stop-relaunch-trigger.sh" \
+    "echo '$cmd' | grep -q 'stop-relaunch-trigger\.sh'"
+  assert "MERGE-FRESH: Stop command resolves to a real file" \
+    "[ -f \"\$(echo '$cmd' | awk '{print \$NF}')\" ]"
   rm -rf "$d"
 }
 run_merge_fresh
+
+run_merge_remove_stop() {
+  local d; d=$(mktemp -d)
+  bash "$REPO_DIR/tools/merge-settings.sh" "$d/settings.json"
+  assert "MERGE-STOP: Stop registered after merge" \
+    "[ \"\$(jq -r '.hooks.Stop | length' '$d/settings.json')\" = '1' ]"
+  bash "$REPO_DIR/tools/merge-settings.sh" --remove "$d/settings.json"
+  assert "MERGE-STOP-REMOVE: Stop key gone after --remove" \
+    "[ \"\$(jq -r '.hooks.Stop // \"absent\"' '$d/settings.json')\" = 'absent' ]"
+  rm -rf "$d"
+}
+run_merge_remove_stop
 
 run_merge_preserve_user() {
   local d; d=$(mktemp -d)

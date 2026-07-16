@@ -44,6 +44,10 @@ rm -f "/tmp/claude-context-pct-${SESSION_ID}"
 rm -f "/tmp/claude-context-triggered-${SESSION_ID}"
 rm -f "/tmp/baton-done-${SESSION_ID}"
 rm -f "/tmp/baton-done-${SESSION_ID}.fired"
+# E6 relaunch driver's fire-once marker. NOTE: the RELAUNCH REQUEST marker
+# ($BATON_RELAUNCH_REQ, terminal-keyed) must NOT be swept here - the supervisor
+# reads it after this hook runs, and its survival is the whole mechanism.
+rm -f "/tmp/baton-done-${SESSION_ID}.relaunch-fired"
 rm -f "/tmp/baton-pending-${SESSION_ID}"
 rm -f "/tmp/baton-archive-${SESSION_ID}"
 rm -f "/tmp/baton-health-${SESSION_ID}"

@@ -53,6 +53,11 @@ _show() {
   printf '  %-32s %-40s %s\n' 'BATON_OUTCOME_PROXIES:'    "$(_cfg::get BATON_OUTCOME_PROXIES 0)" "$(_src BATON_OUTCOME_PROXIES)"
   printf '  %-32s %-40s %s\n' 'BATON_PREWARM:'            "$(_cfg::get BATON_PREWARM 0)" "$(_src BATON_PREWARM)"
   printf '  %-32s %-40s %s\n' 'BATON_EVENT_LOG_DISABLE:'  "$(_cfg::get BATON_EVENT_LOG_DISABLE 0)" "$(_src BATON_EVENT_LOG_DISABLE)"
+  # Resolver, NOT a bare _cfg::get on the raw key: the latter would skip the legacy
+  # BATON_AUTO_CONTINUE=1 -> tmux fallback and print `off [default]` while
+  # checkpoint-write-trigger.sh arms the tmux injector - the exact disagreement
+  # lib/config.sh:6-10 forbids.
+  printf '  %-32s %-40s %s\n' 'auto_continue_mode:' "$(_cfg::auto_continue_mode)" "$(_src BATON_AUTO_CONTINUE_MODE auto_continue_mode)"
   printf '\n[Event-log]\n'
   printf '  %-32s %-40s %s\n' 'BATON_EVENT_LOG:'      "$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")" "$(_src BATON_EVENT_LOG)"
   printf '  %-32s %-40s %s\n' 'BATON_OTEL_EXPORT:'    "$(_cfg::get BATON_OTEL_EXPORT '')" "$(_src BATON_OTEL_EXPORT)"
@@ -76,6 +81,8 @@ _show() {
   printf 'until you unset the shadowing env var. threshold_pct moves the actual checkpoint\n'
   printf 'trigger (bounds 1-99, else %s) and is reported unchanged in the telemetry\n' "$BATON_DEFAULT_PCT_THRESHOLD"
   printf 'threshold field.\n'
+  printf 'auto_continue_mode shows tmux [default] when only the legacy BATON_AUTO_CONTINUE=1\n'
+  printf 'is set: the mode IS defaulted, and the legacy flag is what that default resolves to.\n'
 }
 
 _set_one() {
@@ -132,10 +139,13 @@ _set_one() {
     BATON_STATUSLINE_COLOR_MODE)
       case "$value" in off|solid|bands) ;; *) echo "Error: $key color mode must be one of: off, solid, bands" >&2; return 1;; esac
       ;;
+    auto_continue_mode)
+      case "$value" in off|tmux|relaunch) ;; *) echo "Error: $key must be one of: off, tmux, relaunch" >&2; return 1;; esac
+      ;;
     *)
       cat >&2 <<'EOF'
 Error: unknown key. Valid keys:
-  [Existing]   template, threshold_pct, display_name, templates_dir, project_context_file, max_terminals_per_workstream
+  [Existing]   template, threshold_pct, display_name, templates_dir, project_context_file, max_terminals_per_workstream, auto_continue_mode
   [Paths]      BATON_DIR, BATON_PROGRESS_DIR, BATON_ARCHIVE_DIR, BATON_PROJECT_DIR
   [TTLs]       BATON_WORKSTREAM_TTL_DAYS, BATON_TRACKING_TTL_DAYS, BATON_TMP_TTL_HOURS
   [Opt-ins]    BATON_COLLECT, BATON_TIMING, BATON_OUTCOME_PROXIES, BATON_PREWARM, BATON_EVENT_LOG_DISABLE

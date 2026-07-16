@@ -44,7 +44,7 @@ Cited: `lib/config.sh:10-40`.
 ### `hooks/hooks.json`
 
 - The plugin's hook-wiring manifest.
-- Points the 7 hook events (`PreToolUse`, `PostToolUse`, `PostToolBatch`, `SubagentStop`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`) at `${CLAUDE_PLUGIN_ROOT}/.claude/hooks/*`.
+- Points the 8 hook events (`PreToolUse`, `PostToolUse`, `PostToolBatch`, `SubagentStop`, `Stop`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`) at `${CLAUDE_PLUGIN_ROOT}/.claude/hooks/*`.
 
 ### `.claude/settings.json`
 
@@ -56,9 +56,24 @@ Cited: `lib/config.sh:10-40`.
 - Cost-model audit bookkeeping: audit date, cost-model version, per-arm residuals, next-audit-due, and related instrument state.
 - This is **internal measurement-instrument state, not a user-tunable knob.** Do not edit it to change behavior.
 
-## Auto-continue (tmux, opt-in)
+## Auto-continue (opt-in)
 
-`BATON_AUTO_CONTINUE` is **off by default** and does nothing unless the session runs inside tmux. When enabled inside tmux, after a checkpoint save the tool auto-sends `/clear` and a continue nudge into the *same* tmux pane, so you do not have to hand off the next session yourself. It drives this purely through `tmux send-keys` into that pane; it does **not** use PTY/expect or `TIOCSTI`. It fires exactly once per checkpoint, never mid-write, and outside tmux it is a clean no-op.
+Auto-continue is **off by default**. When you turn it on, a checkpoint save hands off to the next session for you instead of leaving you to do it by hand. Two drivers do that, and they are **options, not a progression** - neither is recommended over the other, and neither is the default. Pick the one that fits how you already work.
+
+| Mode | Needs | How it continues |
+|---|---|---|
+| `tmux` | the session running inside tmux | sends `/clear` + a nudge into the *same* pane; the session keeps running |
+| `relaunch` | launching via `tools/baton-run.sh` instead of `claude` | the session exits at turn end and a fresh `claude` starts in the same terminal |
+
+`BATON_AUTO_CONTINUE_MODE` (default `off`) selects the driver: `off`, `tmux`, or `relaunch`. Set it in the environment, or persist it with `tools/baton-dashboard.sh set auto_continue_mode=relaunch`. An unrecognized value resolves to `off` - a typo must never arm a driver.
+
+**`BATON_AUTO_CONTINUE=1` still means tmux.** If you set it and leave `BATON_AUTO_CONTINUE_MODE` unset, you get exactly the tmux behavior you had before, unchanged. The legacy flag acts as a *default*, consulted only when no mode is set at any layer - so an explicit mode (env or `config.json`) wins over it.
+
+Cited: `lib/config.sh:65-73`.
+
+### tmux driver
+
+When enabled inside tmux, after a checkpoint save the tool auto-sends `/clear` and a continue nudge into the *same* tmux pane, so you do not have to hand off the next session yourself. It drives this purely through `tmux send-keys` into that pane; it does **not** use PTY/expect or `TIOCSTI`. It fires exactly once per checkpoint, never mid-write, and outside tmux it is a clean no-op.
 
 - `BATON_AUTO_CONTINUE` (default off): set to `1` **and** run inside tmux to enable the behavior above. Any other value, or no tmux, leaves it disabled.
 - `BATON_AUTO_CONTINUE_NUDGE` (default `proceed`): the text sent after `/clear` to start the next session working on the auto-injected progress.
@@ -67,6 +82,20 @@ Cited: `lib/config.sh:10-40`.
 **Abort:** delete `/tmp/baton-done-<session_id>` during the brief readiness poll before the keys are sent. Unsetting `BATON_AUTO_CONTINUE` in the pane does **not** abort an already-spawned injector - it is a detached process with a frozen environment, so deleting the done-flag is the only mechanism that stops it.
 
 **First use:** idle detection is a best-effort heuristic. Before relying on it, enable it once in your real terminal and confirm `/clear` fires only after a turn ends. The feature is off by default and abortable (delete the done-flag), and every committed action is logged, so a mis-fire is diagnosable.
+
+### Fresh-relaunch driver
+
+Launch `bash tools/baton-run.sh` **instead of** `claude` - any arguments pass straight through - and set `BATON_AUTO_CONTINUE_MODE=relaunch`. After a checkpoint save the session ends at the turn boundary and a fresh `claude` starts in the same terminal, where SessionStart re-injects the progress file. That is a clear-and-continue with no tmux and no keystroke injection.
+
+**Why a wrapper?** No hook can end a session from the inside, so something outside the session has to start the next one. `baton-run.sh` is that supervisor: it runs `claude` in the foreground and relaunches only when the helper leaves a marker saying it ended the session *for* a relaunch. Quit normally and there is no marker, so the loop ends - that is the ordinary way out.
+
+- `BATON_AUTO_CONTINUE_MODE` (default `off`): set to `relaunch` for this driver. See the mode selector above.
+- `BATON_RELAUNCH_MAX` (default `10`): cap on relaunches per `baton-run` invocation. On reaching it the supervisor stops and says so; run `baton-run` again to keep going. A non-numeric value falls back to `10` rather than uncapping.
+- `BATON_RELAUNCH_LOG` (default `${TMPDIR:-/tmp}/baton-relaunch.log`): once a relaunch is armed it is committed, so every terminal state past that point writes one line here (`armed`, `relaunch-requested`, `degraded-sigkill`, and the `noop-*` / `fail-*` tags). Check it if a relaunch did not behave as expected.
+
+**Abort:** delete `/tmp/baton-done-<session_id>` before the turn ends and nothing is ever armed. Setting or unsetting an env var in the terminal does **not** abort an armed relaunch - the helper is a detached process with a frozen environment. Deleting the done-flag does not stop one either: the helper never reads it.
+
+**First use:** the relaunch is a real process termination, not a `/clear`. Before relying on it, run it once in your real terminal and confirm the session ends only after a turn completes and the fresh session comes back with your progress injected. The driver is off by default and abortable (delete the done-flag), and every committed action is logged, so a mis-fire is diagnosable.
 
 ## See also
 

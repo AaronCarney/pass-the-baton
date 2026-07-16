@@ -304,7 +304,17 @@ if [ -z "$WS_PROGRESS" ]; then
 elif [ -f "$PROJECT_DIR/$WS_PROGRESS" ] || [ -f "$WS_PROGRESS" ]; then
   RESOLVED="$WS_PROGRESS"
   [ -f "$PROJECT_DIR/$WS_PROGRESS" ] && RESOLVED="$PROJECT_DIR/$WS_PROGRESS"
-  if [ -z "${AGENT_SESSION_ID:-}" ]; then
+  # source=resume reloads the full prior transcript, so the progress file is
+  # already in context. Injecting it again is not redundant-but-harmless: the
+  # directive text ("this IS your assignment, do NOT re-scope") makes a stale
+  # checkpoint outrank the newer work the transcript already shows. Bind the
+  # terminal (done above) and stay quiet. startup/clear/compact begin with the
+  # transcript gone or summarized, so there the file is the only bridge.
+  # Unknown/absent source still injects - fail toward continuity.
+  if [ -z "${AGENT_SESSION_ID:-}" ] && [ "$MATCHER" = "resume" ]; then
+    echo "NOTE: resumed workstream '${WS_DISPLAY:-$WS_NAME}' - progress not re-injected (prior transcript is already in context). Latest checkpoint: $RESOLVED"
+    echo ""
+  elif [ -z "${AGENT_SESSION_ID:-}" ]; then
     echo "--- Workstream Progress (auto-injected) ---"
     echo "IMPORTANT: This progress file IS your assignment. Resume exactly where the previous session stopped."
     echo "Follow the What's Next section literally. Do NOT reinterpret, re-scope, or start fresh."

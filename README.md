@@ -108,7 +108,7 @@ Other env vars you might set:
 | `BATON_OUTCOME_PROXIES` | unset | `=1` enables outcome-quality proxy emission (see [`docs/install.md` §4](docs/install.md#4-outcome-quality-proxies-opt-in)) |
 | `BATON_PREWARM` | unset | `=1` issues one max-tokens-0 API call at SessionStart to warm the prompt cache |
 | `BATON_EVENT_LOG_DISABLE` | unset | `=1` suppresses all telemetry emission |
-| `BATON_AUTO_CONTINUE` | unset | `=1` (tmux only) auto-drives `/clear` + a continue nudge into your pane after a checkpoint; clean no-op otherwise. See [`docs/configuration.md` § Auto-continue](docs/configuration.md) |
+| `BATON_AUTO_CONTINUE` | unset | `=1` still means tmux: auto-drives `/clear` + a continue nudge into your pane after a checkpoint; clean no-op otherwise. `BATON_AUTO_CONTINUE_MODE` (`off`\|`tmux`\|`relaunch`) now picks the driver. See [`docs/configuration.md` § Auto-continue](docs/configuration.md) |
 
 Full env-var table (paths, TTLs, archive dirs): [`docs/context-baton.md` § Configuration](docs/context-baton.md#configuration-env-vars).
 

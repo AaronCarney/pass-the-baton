@@ -23,6 +23,9 @@
     ],
     "SubagentStop": [
       { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/post-subagent-cost.sh\"" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/.claude/hooks/stop-relaunch-trigger.sh\"" } ] }
     ]
   }
 }

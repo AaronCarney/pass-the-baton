@@ -12,6 +12,13 @@ HOOK="$HOOKS_DIR/tool-timing.sh"
 # inherit it. OFF/kill-switch paths return before emit, so this is orthogonal.
 export BATON_COLLECT=1
 
+# CC6: _cfg::get resolves env > config.json > default, so an unset BATON_TIMING
+# falls through to the real ~/.config/baton/config.json. Point XDG_CONFIG_HOME at
+# an empty dir so the off-path cases assert the shipped default, not the
+# developer's own opt-in. Every case here is env-driven; none tests config.json.
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+export XDG_CONFIG_HOME="$TMP/config"
+
 PASSED=0
 FAILED=0
 FAILED_CASES=()
