@@ -253,25 +253,102 @@ run_t20() {
 }
 run_t20
 
-# T16: basename mismatch → hook warns and skips cleanup (pre-existing guard)
+# T16: basename mismatch -> hook BLOCKS and names the correct path (was a soft warn)
 run_t16() {
   local proj; proj=$(mkproj)
   local alpha; alpha=$(mkproject_link "$proj" "alpha")
   local sid="sid-t16-$$"
-  local t_file="$proj/docs/sessions/.tracking/bn-t.json"
-  echo '{"workstream":"alpha-ws","display_name":"alpha","phase":"impl"}' > "$t_file"
-  echo "$t_file" > "/tmp/claude-session-tracking-$sid"
+  local tr="$proj/docs/sessions/.tracking"
+  seed_terminal "$tr" "CTerm" "alpha-ws" "alpha"
   touch "/tmp/baton-pending-$sid"
-  # Progress filename doesn't reference the workstream
   local f="$proj/docs/sessions/progress-wrong-name.md"
   echo "# unrelated" > "$f"
   local out; out=$(run_checkpoint "$proj" "$sid" "$alpha" "$f")
-  assert "T16: basename mismatch warns" "echo \"\$out\" | grep -q 'does not contain current workstream'"
+  local blocked=0; printf '%s' "$out" | grep -q '"decision": *"block"' && blocked=1
+  local named=0;   printf '%s' "$out" | grep -q 'progress-alpha-ws-' && named=1
+  assert "T16: basename mismatch blocks via top-level decision" "[ $blocked -eq 1 ]"
+  assert "T16: block reason names the correct target path" "[ $named -eq 1 ]"
   assert "T16: file left in place" "[ -f '$f' ]"
+  assert "T16: PENDING kept" "[ -f '/tmp/baton-pending-$sid' ]"
+  assert "T16: DONE not set" "[ ! -f '/tmp/baton-done-$sid' ]"
   rm -f "/tmp/claude-session-tracking-$sid" "/tmp/baton-pending-$sid" "/tmp/baton-done-$sid"
   rm -rf "$proj"
 }
 run_t16
+
+# T22: no workstream resolves -> block with a message that countermands /clear
+run_t22() {
+  local proj; proj=$(mkproj)
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  local sid="sid-t22-$$"
+  touch "/tmp/baton-pending-$sid"
+  # No terminal seeded and no workstream carries this session_id.
+  local f="$proj/docs/sessions/progress-unassociated-20260718-000000.md"
+  echo "# orphan" > "$f"
+  local out; out=$(run_checkpoint "$proj" "$sid" "$alpha" "$f" "UTerm")
+  local blocked=0; printf '%s' "$out" | grep -q '"decision": *"block"' && blocked=1
+  local failed=0;  printf '%s' "$out" | grep -qi 'SAVE FAILED' && failed=1
+  # Anchor on /clear, not a bare "do NOT": the assertion is named for the /clear
+  # countermand, and a reason rewritten without it must fail this case.
+  local noclear=0; printf '%s' "$out" | grep -q '/clear' && noclear=1
+  assert "T22: unresolved workstream blocks" "[ $blocked -eq 1 ]"
+  assert "T22: reason says the save failed" "[ $failed -eq 1 ]"
+  assert "T22: reason countermands /clear" "[ $noclear -eq 1 ]"
+  assert "T22: PENDING kept" "[ -f '/tmp/baton-pending-$sid' ]"
+  assert "T22: DONE not set" "[ ! -f '/tmp/baton-done-$sid' ]"
+  rm -f "/tmp/claude-session-tracking-$sid" "/tmp/baton-pending-$sid" "/tmp/baton-done-$sid"
+  rm -rf "$proj"
+}
+run_t22
+
+# T23: a MATCHING basename must reach the success path - no block of ANY kind.
+#
+# This case asserts the absence of a top-level "decision" key, not merely the
+# absence of the cross-workstream message, and pairs that with a POSITIVE anchor
+# on the success payload. Both halves are needed: "no block" alone would also be
+# satisfied by the hook exiting early before it ever reached the guard, which
+# would make the case pass while proving nothing.
+#
+# The fixture is a one-line stub and it does NOT fail the lint pipeline, despite
+# what a lint-in-isolation reading suggests. mkproj (test-workstream-hooks.sh:45)
+# creates an EMPTY share/templates/free.md, so V1's directive line-diff compares
+# empty against empty and passes, and V7/V8 read a manifest .json that does not
+# exist in the fixture. Confirmed by running this exact fixture through
+# run_checkpoint on the unmodified tree: no block, no lint failure, and the full
+# "Checkpoint save complete" payload. Do not weaken these assertions back to a
+# guard-message-only check.
+run_t23() {
+  local proj; proj=$(mkproj)
+  local alpha; alpha=$(mkproject_link "$proj" "alpha")
+  local sid="sid-t23-$$"
+  local tr="$proj/docs/sessions/.tracking"
+  seed_terminal "$tr" "CTerm" "alpha-ws" "alpha"
+  touch "/tmp/baton-pending-$sid"
+  local f="$proj/docs/sessions/progress-alpha-ws-abc123.md"
+  echo "# good" > "$f"
+  local out; out=$(run_checkpoint "$proj" "$sid" "$alpha" "$f")
+  local tripped=0;  printf '%s' "$out" | grep -qi 'does not belong to the current workstream' && tripped=1
+  local blocked=0;  printf '%s' "$out" | grep -q '"decision"' && blocked=1
+  local complete=0; printf '%s' "$out" | grep -q 'Checkpoint save complete' && complete=1
+  assert "T23: matching basename does not trip the cross-workstream guard" "[ $tripped -eq 0 ]"
+  assert "T23: matching basename emits no top-level decision at all" "[ $blocked -eq 0 ]"
+  assert "T23: hook ran to completion (success payload emitted)" "[ $complete -eq 1 ]"
+  rm -f "/tmp/claude-session-tracking-$sid" "/tmp/baton-pending-$sid" "/tmp/baton-done-$sid"
+  rm -rf "$proj"
+}
+run_t23
+
+# T24: no permissionDecision may remain in this hook. On PostToolUse the key is
+# not in the schema, so it is stripped silently and any block it claims is inert.
+run_t24() {
+  local hits
+  # Match 'permissionDecision:' WITH the colon. Step 4's mandated comment mentions
+  # hookSpecificOutput.permissionDecision in prose, so a bare-word grep counts that
+  # comment and this assertion could never pass on a correct tree.
+  hits=$(grep -c 'permissionDecision:' "$CP" || true)
+  assert "T24: no permissionDecision remains in checkpoint-write-trigger" "[ '$hits' = '0' ]"
+}
+run_t24
 
 # ----- term_hash fallback tests -----
 

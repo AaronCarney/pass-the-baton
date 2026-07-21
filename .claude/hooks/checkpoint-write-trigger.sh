@@ -69,6 +69,7 @@ _WT_START_MS=$(date +%s%3N 2>/dev/null || echo 0)
 # Only fire on writes to progress files
 [ -z "$FILE_PATH" ] && exit 0
 case "$(basename "$FILE_PATH")" in
+  *.scaffold.md) exit 0 ;;
   progress-*.md) ;;
   *) exit 0 ;;
 esac
@@ -109,6 +110,19 @@ WS_DISPLAY=""
 if [ -n "$WORKSTREAM" ] && [ -f "$TRACKING_DIR/workstreams/${WORKSTREAM}.json" ]; then
   WS_DISPLAY=$(jq -r '.display_name // empty' "$TRACKING_DIR/workstreams/${WORKSTREAM}.json")
 fi
+# Reacquire by session_id when the terminal binding did not resolve, so both
+# halves of a checkpoint agree on the workstream. Reached only on a binding miss.
+if [ -z "$WORKSTREAM" ]; then
+  WORKSTREAM=$(find_workstream_by_session_id "$TRACKING_DIR" "$SESSION_ID" 2>/dev/null || true)
+  if [ -n "$WORKSTREAM" ]; then
+    rebind_terminal "$TRACKING_DIR" "$WORKSTREAM"
+    log_event "$PROJECT_DIR" checkpoint reacquire-by-session-id \
+      "session_id=$SESSION_ID" "workstream=$WORKSTREAM" 2>/dev/null || true
+    if [ -f "$TRACKING_DIR/workstreams/${WORKSTREAM}.json" ]; then
+      WS_DISPLAY=$(jq -r '.display_name // empty' "$TRACKING_DIR/workstreams/${WORKSTREAM}.json")
+    fi
+  fi
+fi
 T_FILE=""
 POINTER="/tmp/claude-session-tracking-${SESSION_ID}"
 [ -f "$POINTER" ] && T_FILE=$(cat "$POINTER")
@@ -134,12 +148,22 @@ if [ "$_OK" = false ]; then
   log_event "$PROJECT_DIR" checkpoint basename-reject \
     "session_id=$SESSION_ID" "workstream=$WORKSTREAM" "tracked_dn=$WS_DISPLAY" \
     "basename=$_BN" "cwd=$CWD"
-  jq -n --arg bn "$_BN" --arg ws "$WORKSTREAM" '{
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: ("CHECKPOINT WARNING: Progress file basename \"" + $bn + "\" does not contain current workstream \"" + $ws + "\". Cleanup skipped - rewrite to a path that includes the workstream ID.")
-    }
-  }'
+  # Top-level decision/reason - the documented PostToolUse blocking shape.
+  # hookSpecificOutput.permissionDecision does NOT exist for PostToolUse and is
+  # silently stripped, which is why the previous warning here never blocked.
+  # PENDING stays set and DONE is never written, so the save is still owed.
+  if [ -n "$WORKSTREAM" ]; then
+    _WANT="progress-${WORKSTREAM}-$(term_hash).md"
+    jq -n --arg bn "$_BN" --arg want "$_WANT" '{
+      decision: "block",
+      reason: ("CHECKPOINT NOT SAVED. The progress file was written to \"" + $bn + "\", which does not belong to the current workstream, so it was not registered as a handoff. Re-write the SAME content to \"" + $want + "\" in the progress directory. Do NOT tell the user to /clear until that write succeeds.")
+    }'
+  else
+    jq -n --arg bn "$_BN" '{
+      decision: "block",
+      reason: ("CHECKPOINT SAVE FAILED. No workstream could be resolved for this session, so \"" + $bn + "\" was not registered as a handoff. Do NOT tell the user to /clear - the session state is unsaved and clearing now loses it. Report the failure to the user instead.")
+    }'
+  fi
   exit 0
 fi
 
@@ -166,20 +190,29 @@ if [ -n "$LINT_ERR" ]; then
   log_event "$PROJECT_DIR" checkpoint lint-fail \
     "session_id=$SESSION_ID" "workstream=$WORKSTREAM" "progress=$ABS_FILE"
   jq -n --arg msg "$LINT_ERR" '{
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      permissionDecision: "block",
-      additionalContext: ($msg + "\n\nThe progress file write is blocked. Re-write the file with the issue corrected; the lint will re-run on the next write.")
-    }
+    decision: "block",
+    reason: ($msg + "\n\nThe progress file failed validation and was NOT registered as a handoff. Re-write the file with the issue corrected; the lint re-runs on the next write. Do NOT tell the user to /clear until it passes.")
   }'
   exit 0
 fi
 
 SAVE_OK=true
+# Invariant: past the cross-workstream guard, WORKSTREAM is non-empty. Enforce it
+# rather than assuming it - everything below (pointer save, PENDING clear, DONE
+# latch) is only correct under it, and the DONE latch is not itself guarded.
+if [ -z "$WORKSTREAM" ]; then
+  log_event "$PROJECT_DIR" checkpoint invariant-no-workstream \
+    "session_id=$SESSION_ID" "basename=$_BN" "cwd=$CWD"
+  jq -n --arg bn "$_BN" '{
+    decision: "block",
+    reason: ("CHECKPOINT SAVE FAILED. No workstream could be resolved for this session, so \"" + $bn + "\" was not registered as a handoff. Do NOT tell the user to /clear - the session state is unsaved and clearing now loses it. Report the failure to the user instead.")
+  }'
+  exit 0
+fi
 if [ -n "$WORKSTREAM" ]; then
   AP="$TRACKING_DIR/workstreams/${WORKSTREAM}.json"
   EXISTING_DN="$WS_DISPLAY"
-  [ -z "$EXISTING_DN" ] && EXISTING_DN=$(derive_display_name "$CWD" "$PROJECT_DIR")
+  [ -z "$EXISTING_DN" ] && EXISTING_DN=$(derive_display_name "$CWD" "$PROJECT_DIR" "$WORKSTREAM")
   # phase lives in the workstream record, not per-session tracking. Preserve
   # existing value across updates; default to "implementation" only on first write.
   PHASE="implementation"
@@ -227,21 +260,32 @@ fi
 # retries cleanup, skip archive (would orphan the old files), and do NOT
 # latch DONE (would hard-block the session unrecoverably).
 if [ "$SAVE_OK" = false ]; then
+  # This is the path where the pointer write ACTUALLY failed, i.e. the handoff is
+  # genuinely lost - strictly worse than basename-reject, which does block. It
+  # previously emitted advisory additionalContext only, which PostToolUse strips,
+  # so the tool result read as success and the model went on to tell the user to
+  # /clear. Downstream the workstream record still points at the PREVIOUS
+  # session's progress_file, which exists, so resolve_progress_file's primary
+  # branch succeeds on the stale path and the handoff silently regresses a session.
+  # PENDING stays set and DONE is still never latched - blocking does not change that.
   jq -n '{
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: "CHECKPOINT WARNING: Failed to update workstream pointer (disk/permission?). State is incomplete and PENDING is still set. Retry by writing the progress file again, or surface the failure to the user."
-    }
+    decision: "block",
+    reason: "CHECKPOINT NOT SAVED. Updating the workstream pointer failed (disk full or permissions?), so the progress file was not registered as a handoff. Re-write the progress file to retry. Do NOT tell the user to /clear - the session state is unsaved and clearing now loses it."
   }'
   exit 0
 fi
 
 # Export prior progress path for rolloff::dispatch (fresh_judgment needs to diff against it).
-# ARCHIVE_LIST is written by PreToolUse and holds the prior files most-recent-first.
 ARCHIVE_LIST="/tmp/baton-archive-${SESSION_ID}"
+# The list is produced by a bash glob, so it arrives in collation order, NOT
+# most-recent-first as previously commented. rolloff needs the newest prior file.
+# The scaffold exclusion is required, not defensive: the producer's glob matches
+# progress-<ws>-<hash>.scaffold.md, and under mtime ordering a leftover scaffold
+# outranks the real file whenever it is newer - which is finding B2 again.
 ROLLOFF_PRIOR_PROGRESS=""
 if [ -f "$ARCHIVE_LIST" ]; then
-  ROLLOFF_PRIOR_PROGRESS=$(head -1 "$ARCHIVE_LIST" 2>/dev/null || true)
+  ROLLOFF_PRIOR_PROGRESS=$(grep -v '\.scaffold\.md$' "$ARCHIVE_LIST" 2>/dev/null \
+    | xargs -r -d '\n' ls -t 2>/dev/null | head -1 || true)
 fi
 export ROLLOFF_PRIOR_PROGRESS
 
@@ -265,7 +309,10 @@ if [ -f "$ARCHIVE_LIST" ]; then
     [ -f "$f" ] || continue
     [ "$(readlink -f "$f")" = "$(readlink -f "$ABS_FILE")" ] && continue
     BASE=$(basename "$f" .md)
-    mv "$f" "$ARCHIVE_DIR/${BASE}-${TIMESTAMP}.md" 2>/dev/null
+    if ! mv "$f" "$ARCHIVE_DIR/${BASE}-${TIMESTAMP}.md" 2>/dev/null; then
+      log_event "$PROJECT_DIR" checkpoint archive-failed \
+        "session_id=$SESSION_ID" "file=$f" "dest=$ARCHIVE_DIR" 2>/dev/null || true
+    fi
   done < "$ARCHIVE_LIST"
   rm -f "$ARCHIVE_LIST"
 fi
@@ -320,9 +367,10 @@ fi
 } || true
 
 PCT=$(cat "/tmp/claude-context-pct-${SESSION_ID}" 2>/dev/null || echo "")
+[[ "$PCT" =~ ^[0-9]+$ ]] || PCT=""
 jq -n --arg pct "$PCT" '{
   hookSpecificOutput: {
     hookEventName: "PostToolUse",
-    additionalContext: "Checkpoint save complete. Active pointer updated, old progress files archived. Tell the user: \"Context at " + $pct + "%. Progress saved. Please /clear to continue.\" Do NOT take any further actions - subsequent tool calls will be blocked."
+    additionalContext: ("Checkpoint save complete. Active pointer updated, old progress files archived. Tell the user: \"" + (if $pct == "" then "Progress saved." else "Context at " + $pct + "%. Progress saved." end) + " Please /clear to continue.\" Do NOT take any further actions - subsequent tool calls will be blocked.")
   }
 }'

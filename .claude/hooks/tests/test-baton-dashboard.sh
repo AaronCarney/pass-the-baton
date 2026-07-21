@@ -138,14 +138,125 @@ bash "$DASH" set threshold_pct=150 >/dev/null 2>&1; rc=$?
 set -e
 [ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: threshold_pct=150 should reject' >&2; }
 
-# Case M (M6): template switch refused while a PENDING flag is set.
-touch /tmp/baton-pending-test-t4m6
+# --- Session-scoped liveness guard (E4): the template switch blocks ONLY on THIS
+# terminal's OWN owed checkpoint, resolved via the per-terminal parent-sid map
+# (session-start.sh:207). Bind this terminal deterministically: a fixed
+# CLAUDE_TERMINAL_ID makes term_hash reproducible so we can write the map entry
+# the dashboard will read back.
+export CLAUDE_TERMINAL_ID="dash-test-term-$$"
+_myhash() { CLAUDE_TERMINAL_ID="$1" bash -c "source $REPO/.claude/hooks/lib/workstream-lib.sh && term_hash"; }
+TH_SELF=$(_myhash "$CLAUDE_TERMINAL_ID")
+
+# Case M (M6): template switch refused while THIS terminal's LIVE checkpoint is in
+# flight. The parent-sid map binds the flag to this terminal; the pct sibling is
+# what makes it live (without it this is a stale flag, ignored below).
+m6_sid="dash-m6-$$"
+echo "$m6_sid" > "/tmp/claude-parent-sid-${TH_SELF}"
+touch "/tmp/baton-pending-${m6_sid}"
+echo 42 > "/tmp/claude-context-pct-${m6_sid}"
 set +e
 out=$(bash "$DASH" set template=free 2>&1); rc=$?
 set -e
-rm -f /tmp/baton-pending-test-t4m6
-[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: template switch should refuse while PENDING' >&2; }
+rm -f "/tmp/claude-parent-sid-${TH_SELF}" "/tmp/baton-pending-${m6_sid}" "/tmp/claude-context-pct-${m6_sid}"
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: template switch should refuse while a live checkpoint is in flight' >&2; }
 _acontains "$out" 'in flight' 'PENDING refusal message mentions in flight'
+
+# A stale PENDING flag whose session is gone must not block a template switch.
+# Liveness signal: the statusline rewrites /tmp/claude-context-pct-<sid> every
+# turn, and cleanup-on-exit removes both files together on a clean exit. So a
+# pending flag with no fresh pct sibling belongs to a dead session. Session-scoping
+# makes this unconditional and attributable: the flag is THIS terminal's own.
+stale_sid="dash-stale-$$"
+echo "$stale_sid" > "/tmp/claude-parent-sid-${TH_SELF}"
+echo 99 > "/tmp/baton-pending-${stale_sid}"
+set +e
+out=$(bash "$DASH" set template=task 2>&1); rc=$?
+set -e
+rm -f "/tmp/claude-parent-sid-${TH_SELF}" "/tmp/baton-pending-${stale_sid}"
+[ "$rc" = '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: stale PENDING flag should not block template switch (rc=$rc: $out)" >&2; }
+
+# A LIVE checkpoint owed by THIS terminal must still block.
+live_sid="dash-live-$$"
+echo "$live_sid" > "/tmp/claude-parent-sid-${TH_SELF}"
+echo 99 > "/tmp/baton-pending-${live_sid}"
+echo 42 > "/tmp/claude-context-pct-${live_sid}"
+set +e
+out=$(bash "$DASH" set template=free 2>&1); rc=$?
+set -e
+rm -f "/tmp/claude-parent-sid-${TH_SELF}" "/tmp/baton-pending-${live_sid}" "/tmp/claude-context-pct-${live_sid}"
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: live checkpoint should still block template switch' >&2; }
+
+# A pct sibling OLDER than the TTL is not liveness - it is a dead session whose
+# files have not been swept yet. This drives the find -mmin predicate itself,
+# which no other case reaches.
+old_sid="dash-old-$$"
+echo "$old_sid" > "/tmp/claude-parent-sid-${TH_SELF}"
+echo 99 > "/tmp/baton-pending-${old_sid}"
+touch -d '2 days ago' "/tmp/claude-context-pct-${old_sid}"
+set +e
+out=$(bash "$DASH" set template=task 2>&1); rc=$?
+set -e
+rm -f "/tmp/claude-parent-sid-${TH_SELF}" "/tmp/baton-pending-${old_sid}" "/tmp/claude-context-pct-${old_sid}"
+[ "$rc" = '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: pct sibling older than the TTL should not count as live (rc=$rc: $out)" >&2; }
+
+# M6-mode: the liveness WINDOW is mode-dependent, and this is the only case that
+# exercises the auto_continue_mode branch. The same pending flag, with a pct
+# sibling aged BETWEEN the short auto window (~15 min) and the long manual window
+# (the /tmp TTL), must read DEAD under auto-continue and LIVE under manual. Drive
+# the mode via the BATON_AUTO_CONTINUE_MODE env override (env outranks config in
+# _cfg::get), so no fixture config.json edit is needed.
+mode_sid="dash-mode-$$"
+echo "$mode_sid" > "/tmp/claude-parent-sid-${TH_SELF}"
+echo 99 > "/tmp/baton-pending-${mode_sid}"
+touch -d '30 minutes ago' "/tmp/claude-context-pct-${mode_sid}"
+set +e
+out=$(BATON_AUTO_CONTINUE_MODE=relaunch bash "$DASH" set template=task 2>&1); rc_auto=$?
+out2=$(BATON_AUTO_CONTINUE_MODE=off      bash "$DASH" set template=free 2>&1); rc_manual=$?
+set -e
+rm -f "/tmp/claude-parent-sid-${TH_SELF}" "/tmp/baton-pending-${mode_sid}" "/tmp/claude-context-pct-${mode_sid}"
+[ "$rc_auto" = '0' ]   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: auto-continue mode should read a 30-min-old flag as dead (rc=$rc_auto: $out)" >&2; }
+[ "$rc_manual" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: manual mode should read the same flag as live (rc=$rc_manual: $out2)" >&2; }
+
+# Case (a): a DIFFERENT terminal's live flag must NOT block this terminal. The
+# parent-sid map points at sid_self, but the live pending+pct pair belongs to
+# sid_other. Pre-session-scoping this blocked (machine-wide glob); now it allows.
+sid_self="dash-self-$$"; sid_other="dash-other-$$"
+echo "$sid_self" > "/tmp/claude-parent-sid-${TH_SELF}"
+echo 99 > "/tmp/baton-pending-${sid_other}"
+echo 42 > "/tmp/claude-context-pct-${sid_other}"
+set +e
+out=$(bash "$DASH" set template=task 2>&1); rc=$?
+set -e
+rm -f "/tmp/claude-parent-sid-${TH_SELF}" "/tmp/baton-pending-${sid_other}" "/tmp/claude-context-pct-${sid_other}"
+[ "$rc" = '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: a different terminal's live flag must not block (rc=$rc: $out)" >&2; }
+
+# Case (b): THIS terminal's live flag MUST block.
+echo "$sid_self" > "/tmp/claude-parent-sid-${TH_SELF}"
+echo 99 > "/tmp/baton-pending-${sid_self}"
+echo 42 > "/tmp/claude-context-pct-${sid_self}"
+set +e
+out=$(bash "$DASH" set template=free 2>&1); rc=$?
+set -e
+rm -f "/tmp/claude-parent-sid-${TH_SELF}" "/tmp/baton-pending-${sid_self}" "/tmp/claude-context-pct-${sid_self}"
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: this terminal's live flag must block (rc=$rc: $out)" >&2; }
+_acontains "$out" 'in flight' 'own-flag refusal message mentions in flight'
+
+# Case (c): resume-reconnect must still block. A resumed session lands on a NEW
+# term_hash (fresh CLAUDE_TERMINAL_ID) while the SAME session_id still owes; its
+# session-start rewrites parent-sid for the new hash. Running the dashboard under
+# the new terminal id must resolve the resumed sid and block on its own owed
+# checkpoint - proving the guard keys on session_id, not term_hash.
+sid_resumed="dash-resume-$$"
+TERM_RESUME="dash-test-term-resume-$$"
+TH_RESUME=$(_myhash "$TERM_RESUME")
+echo "$sid_resumed" > "/tmp/claude-parent-sid-${TH_RESUME}"
+echo 99 > "/tmp/baton-pending-${sid_resumed}"
+echo 42 > "/tmp/claude-context-pct-${sid_resumed}"
+set +e
+out=$(CLAUDE_TERMINAL_ID="$TERM_RESUME" bash "$DASH" set template=task 2>&1); rc=$?
+set -e
+rm -f "/tmp/claude-parent-sid-${TH_RESUME}" "/tmp/baton-pending-${sid_resumed}" "/tmp/claude-context-pct-${sid_resumed}"
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "FAIL: resume-reconnect must still block its own owed checkpoint (rc=$rc: $out)" >&2; }
 
 # Case N: legacy-key set→show round-trip (regression - env-name vs config-key mismatch).
 # These keys persist under lowercase config keys but show read them via the uppercase

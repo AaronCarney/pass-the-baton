@@ -8,6 +8,24 @@ All notable changes to Pass the Baton are documented here. The format is based o
 
 ---
 
+## [0.3.3] - 2026-07-20
+
+The "no silent handoffs" release: every way a checkpoint could fail to save now either blocks or leaves a record. Previously several of them did neither, and the session looked saved when it was not.
+
+### Fixed
+
+- **A checkpoint that fails to register now stops the session instead of waving it through.** When the workstream pointer could not be written, the hook emitted an advisory note that the tool protocol discards, so the model went on to tell you the checkpoint was saved and to `/clear`. It now blocks, as the other two failure paths already did.
+- **An interrupted checkpoint no longer goes silent while context stays above the threshold.** If the checkpoint turn was cut short, the trigger fired once and then went quiet for the rest of the session - the save was still owed but nothing said so. The hook now re-fires on each following tool call and, if the checkpoint is still unsaved after several attempts, escalates to a hard block.
+- **A session that ends with a checkpoint still owed is recorded** as `abandoned-pending` in the event log, instead of being swept away with no trace.
+- **A malformed context percentage no longer disables checkpointing in silence.** A statusline emitting `20.5` or `20%` instead of `20` now surfaces the health warning naming the offending value, rather than exiting quietly on every tool call.
+- **Carry-forward of the previous progress file works again.** The lookup searched a hardcoded directory that ignored `BATON_PROGRESS_DIR`, plus an archive path nothing writes to, so the `Archived` section silently rendered empty. It could also select a leftover scaffold over the real file.
+- **The scaffold can no longer be registered as the handoff**, and a leftover scaffold no longer wins the carry-forward lookup.
+- **Blocked tool calls now explain themselves** instead of reporting a bare `Blocked by hook`.
+- **A template switch is now scoped to this terminal's own checkpoint, fully closing E4.** `baton-dashboard.sh set template=...` used to glob every `/tmp/baton-pending-*` flag on the host, so a live checkpoint in another terminal - or a leftover marker from a crashed session - refused the switch for every project on the machine until the marker aged out. It now keys on THIS terminal's resume-stable `session_id`: the switch is refused only when this session's own `/tmp/baton-pending-<session_id>` flag exists alongside a fresh pct sibling inside the mode-dependent liveness window. Another terminal's in-flight checkpoint no longer blocks you, and a `claude --resume` reconnect still blocks its own owed checkpoint.
+- Archive failures are recorded rather than swallowed; the rollover lookup now picks the newest prior progress file instead of the alphabetically-first; and the workstream display name no longer blanks on the record-absent path.
+
+---
+
 ## [0.3.2] - 2026-07-16
 
 The "clean resumes" release: a second, tmux-free way to hand off between checkpointed sessions, and `claude --resume` no longer replays a checkpoint over a transcript that already has it.

@@ -96,5 +96,5 @@ On validation failure, the driver prints an error to stderr and exits 1 without 
 - Config file: `$XDG_CONFIG_HOME/baton/config.json` (or `~/.config/baton/config.json` if XDG unset)
 - Atomic writes under flock
 - Template switch is refused while a checkpoint is in flight (PENDING flag set) - retry after the progress file is written
-- The PENDING check (`/tmp/baton-pending-*`) matches any Claude Code session on the host, not just the current one. Template switch is refused while ANY Claude Code session on this host has a pending checkpoint. This is intentionally conservative - wait for the in-flight checkpoint to clear (typically a single `Write` away).
+- The PENDING check is scoped to THIS terminal's own session: the switch is refused only while this session has a live in-flight checkpoint - its own `/tmp/baton-pending-<session_id>` flag (keyed on the resume-stable `session_id`) with a fresh pct sibling inside the liveness window. A pending checkpoint in another terminal or project no longer blocks it. The flag clears on the next progress write (typically a single `Write` away), and is ignored once the owning session ends, since its pct sibling stops refreshing and ages out of the window.
 - The shipped templates (`free`, `task`, `factory`) are always available; custom templates require installation first per `share/templates/README.md`

@@ -87,6 +87,7 @@ SWEEP_PATTERNS=(
   'claude-context-triggered-*'
   'claude-context-pct-*'
   'baton-warned-*'
+  'baton-nag-*'
   'baton-health-*'
   'baton-done-*'
   'baton-relaunch-*'

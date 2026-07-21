@@ -103,8 +103,69 @@ _set_one() {
         echo "Error: unknown template '$value'. Known: $KNOWN_TEMPLATES. (Custom templates: install to $cfg_root/baton/templates/${value}.md first.)" >&2
         return 1
       fi
-      # M6: refuse template switch while a checkpoint is in flight (PENDING flag set).
-      if ls /tmp/baton-pending-* >/dev/null 2>&1; then
+      # M6: refuse a template switch only while THIS terminal's OWN LIVE checkpoint
+      # is in flight. This used to glob /tmp/baton-pending-* unscoped, so any live
+      # checkpoint in any project on the machine blocked a template switch. The
+      # guard keys on session_id, which is STABLE across `claude --resume`
+      # (term_hash is NOT: CLAUDE_TERMINAL_ID is unset by Claude Code, so it
+      # degrades to md5(user:tty) and a resume in another window gets a new hash).
+      # session-start.sh:207 writes an UNCONDITIONAL per-terminal map
+      # /tmp/claude-parent-sid-<term_hash> -> session_id, refreshed on EVERY
+      # SessionStart including source=resume, so the dashboard resolves its own
+      # session_id from its own term_hash (term_hash() is in scope via
+      # workstream-lib.sh at :22) and self-heals across resume. It then checks ONLY
+      # /tmp/baton-pending-<its session_id>; a live flag in any other session no
+      # longer blocks. The statusline rewrites /tmp/claude-context-pct-<sid> every
+      # turn and cleanup-on-exit removes both files together, so a pending flag
+      # whose pct sibling is missing or older than the liveness window
+      # (mode-dependent; see below) belongs to a session that is gone.
+      # KNOWN FAIL-OPEN: when _my_sid is empty the guard ALLOWS the switch, which
+      # under-blocks one rare edge - a single continuous session older than the /tmp
+      # TTL (no /clear|/compact|/resume, which each rewrite :207 and reset the mtime)
+      # whose parent-sid map was swept by cleanup-cron (mtime pinned at session start)
+      # while a live pending flag survives; fail-OPEN toward the owner's less-blocking
+      # goal and advisory (no data loss). Durable fix (refresh the map mtime when the
+      # pending flag is written, in context-checkpoint.sh) is the checkpoint WRITE path
+      # and is DEFERRED. See docs/research/2026-07-20-terminal-scoping-resume-identity.md.
+      _pending_live=0
+      _th=$(term_hash 2>/dev/null || echo "")
+      _my_sid=""
+      if [ -n "$_th" ] && [ -e "/tmp/claude-parent-sid-${_th}" ]; then
+        _my_sid=$(tr -d '[:space:]' < "/tmp/claude-parent-sid-${_th}" 2>/dev/null)
+      fi
+      # session_id is whitelisted [a-zA-Z0-9_-] at every origin; scrub defensively
+      # since the map file lives in world-writable /tmp (empty -> fails open below).
+      case "$_my_sid" in *[!a-zA-Z0-9_-]*) _my_sid="" ;; esac
+      if [ -z "$_my_sid" ]; then
+        _pending_live=0  # this terminal owes nothing; allow the switch
+      else
+        _ttl_min=$(tmp_ttl_minutes 2>/dev/null || echo 1440)
+        [[ "$_ttl_min" =~ ^[0-9]+$ ]] || _ttl_min=1440
+        # The liveness window depends on the checkpoint mode, read from THIS
+        # dashboard's own global config - the same config this switch edits. Under
+        # auto-continue (tmux/relaunch) the session writes the checkpoint itself, so
+        # PENDING clears within a turn or two: a pct sibling older than a few minutes
+        # means the session is gone. Under manual mode (off) the session parks at the
+        # checkpoint and waits for the user, who may be away for hours, so a
+        # legitimately-owed flag must be trusted until the /tmp TTL sweep would reap
+        # it anyway. A single fixed window mis-judges one mode or the other: a short
+        # window calls a live-but-idle manual session dead; the full TTL lets a
+        # crashed auto-continue session block switches for a day. _cfg::auto_continue_mode
+        # is already in scope here (the dashboard calls it at :60).
+        if [ "$(_cfg::auto_continue_mode 2>/dev/null || echo off)" != "off" ]; then
+          _live_min="${BATON_PENDING_LIVE_MIN:-15}"
+          [[ "$_live_min" =~ ^[0-9]+$ ]] || _live_min=15
+        else
+          _live_min="$_ttl_min"
+        fi
+        _pf="/tmp/baton-pending-${_my_sid}"
+        _pct_file="/tmp/claude-context-pct-${_my_sid}"
+        if [ -e "$_pf" ] && [ -e "$_pct_file" ] && \
+           [ -n "$(find "$_pct_file" -maxdepth 0 -mmin -"$_live_min" 2>/dev/null)" ]; then
+          _pending_live=1
+        fi
+      fi
+      if [ "$_pending_live" = "1" ]; then
         echo "Error: cannot switch template while a checkpoint is in flight (PENDING). Wait for the next progress write to clear, then retry." >&2
         return 1
       fi

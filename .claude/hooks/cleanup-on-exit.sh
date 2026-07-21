@@ -39,6 +39,19 @@ if [ -f "$T_POINTER" ]; then
   [ -f "${T_FILE}.lock" ] && rm -f "${T_FILE}.lock"
 fi
 
+# A checkpoint was demanded but never delivered: PENDING is still set and DONE
+# was never latched. Every silent-loss path in the lifecycle converges here, so
+# record it before the sweep below erases the evidence. MUST stay above the
+# section-2 removals - they delete the DONE flag this check reads.
+_CO_PENDING="/tmp/baton-pending-${SESSION_ID}"
+if [ -f "$_CO_PENDING" ] && [ ! -f "/tmp/baton-done-${SESSION_ID}" ]; then
+  _CO_PCT=$(cat "$_CO_PENDING" 2>/dev/null || echo "")
+  if declare -F log_event >/dev/null 2>&1; then
+    log_event "$PROJECT_DIR" checkpoint abandoned-pending \
+      "session_id=$SESSION_ID" "pct=$_CO_PCT" "cwd=$CWD" 2>/dev/null || true
+  fi
+fi
+
 # 2. Clean live /tmp state files for this session ID
 rm -f "/tmp/claude-context-pct-${SESSION_ID}"
 rm -f "/tmp/claude-context-triggered-${SESSION_ID}"
@@ -52,6 +65,7 @@ rm -f "/tmp/baton-pending-${SESSION_ID}"
 rm -f "/tmp/baton-archive-${SESSION_ID}"
 rm -f "/tmp/baton-health-${SESSION_ID}"
 rm -f "/tmp/baton-warned-${SESSION_ID}"
+rm -f "/tmp/baton-nag-${SESSION_ID}"
 rm -f "$T_POINTER"
 
 # 3. Truncate debug log if > 100KB (shared across all terminals)

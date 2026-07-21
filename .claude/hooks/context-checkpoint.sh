@@ -13,14 +13,11 @@ CWD=$(echo "$input" | jq -r '.cwd')
 TOOL_NAME=$(echo "$input" | jq -r '.tool_name // "unknown"')
 [[ "$SESSION_ID" =~ ^[a-zA-Z0-9_-]+$ ]] || exit 0
 
-# Feedback collection
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/lib/feedback-collector.sh" 2>/dev/null || true
 source "$SCRIPT_DIR/lib/workstream-lib.sh" 2>/dev/null || true
 source "$SCRIPT_DIR/lib/envelope.sh" 2>/dev/null || true
 source "$SCRIPT_DIR/lib/template-resolve.sh"   # tpl::resolve_active_template
 source "$SCRIPT_DIR/lib/template-render.sh"    # tpl::render_progress_file
-_FC_SESSION_ID="$SESSION_ID"
 
 # Single threshold source (E-B): the gate comparisons AND the telemetry field
 # below both read this one value, so the trigger and the reported `threshold`
@@ -30,6 +27,13 @@ CC_THRESHOLD=$(checkpoint_threshold 2>/dev/null || echo "${BATON_DEFAULT_PCT_THR
 [[ "$CC_THRESHOLD" =~ ^[0-9]+$ ]] || CC_THRESHOLD="${BATON_DEFAULT_PCT_THRESHOLD:-20}"
 
 : "${_HEALTH_WARN_TOOL_CALLS:=20}"   # warn if no context-pct after N tool calls
+# Re-assert N times before hard-denying an interrupted-but-owed checkpoint. Must
+# be slower than the health warning (this fires every call while a checkpoint is
+# owed) yet fast enough the session cannot run far past threshold unsaved: 3 gives
+# the model two soft reminders - enough to recover from a single interrupted turn -
+# before removing the option. 1 would deny on the first stray call after any
+# interruption; a large value reproduces the silent-drift failure this closes.
+: "${_CC_NAG_LIMIT:=3}"              # re-assert N times before hard-denying
 
 # Emit PreToolUse envelope exactly once (CC2). Trap on EXIT to cover every
 # early-return path. Failures go to stderr, never alter the hook exit code.
@@ -72,7 +76,8 @@ if [ -n "$AGENT_ID" ]; then
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        permissionDecision: "block",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Parent session checkpoint complete. Return your results immediately - no further tool calls allowed.",
         additionalContext: "Parent session checkpoint complete. Return your results immediately - no further tool calls allowed."
       }
     }'
@@ -135,30 +140,45 @@ fi
 PCT=$(cat "/tmp/claude-context-pct-${SESSION_ID}" 2>/dev/null)
 _CC_PCT="$PCT"
 
-# Health check: warn if PCT file missing after $_HEALTH_WARN_TOOL_CALLS tool calls
+# Absent AND malformed both mean "no usable value". Previously only the absent
+# case reached the health counter; a malformed value (e.g. "20.5", "20%", "20 ")
+# bailed at the integer guard with no counter, no warning and no log - silently
+# disabling checkpointing for the whole session. Nothing in this repo writes
+# /tmp/claude-context-pct-*; it is authored by the user's own statusline, so a
+# malformed value is an expected input, not a defensive hypothetical.
+_CC_PCT_BAD=""
 if [ -z "$PCT" ]; then
+  _CC_PCT_BAD="absent"
+elif ! [[ "$PCT" =~ ^[0-9]+$ ]]; then
+  _CC_PCT_BAD="malformed"
+fi
+if [ -n "$_CC_PCT_BAD" ]; then
   COUNT_FILE="/tmp/baton-health-${SESSION_ID}"
   COUNT=$(cat "$COUNT_FILE" 2>/dev/null || echo 0)
+  [[ "$COUNT" =~ ^[0-9]+$ ]] || COUNT=0
   COUNT=$((COUNT + 1))
   echo "$COUNT" > "$COUNT_FILE"
   WARNED="/tmp/baton-warned-${SESSION_ID}"
   if [ "$COUNT" -ge "$_HEALTH_WARN_TOOL_CALLS" ] && [ ! -f "$WARNED" ]; then
     touch "$WARNED"
-    jq -n --arg n "$_HEALTH_WARN_TOOL_CALLS" '{
+    _CC_WARN_DETAIL="Context percentage not available after ${_HEALTH_WARN_TOOL_CALLS}+ tool calls."
+    if [ "$_CC_PCT_BAD" = "malformed" ]; then
+      _CC_WARN_DETAIL="Context percentage is not an integer (got \"${PCT}\") after ${_HEALTH_WARN_TOOL_CALLS}+ tool calls."
+    fi
+    jq -n --arg detail "$_CC_WARN_DETAIL" '{
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "allow",
-        additionalContext: ("WARNING: Context percentage not available after " + $n + "+ tool calls. The statusline may not be configured. Checkpoint auto-save will not trigger. Consider manual checkpoint if session is long.")
+        additionalContext: ("WARNING: " + $detail + " The statusline may not be configured to emit a plain integer. Checkpoint auto-save will not trigger. Consider a manual checkpoint if this session is long.")
       }
     }'
     exit 0
   fi
   exit 0
 fi
-# Treat non-integer PCT as "no value" - see subagent block above for rationale.
-[[ "$PCT" =~ ^[0-9]+$ ]] || exit 0
 [ "$PCT" -lt "$CC_THRESHOLD" ] && exit 0
 
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$CWD}"
 FLAG="/tmp/claude-context-triggered-${SESSION_ID}"
 DONE="/tmp/baton-done-${SESSION_ID}"
 
@@ -167,17 +187,60 @@ if [ -f "$DONE" ]; then
   jq -n '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      permissionDecision: "block",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Checkpoint complete. Do NOT continue working. Tell the user to /clear to start a fresh session.",
       additionalContext: "Checkpoint complete. Do NOT continue working. Tell the user to /clear to start a fresh session."
     }
   }'
   exit 0
 fi
 
-[ -f "$FLAG" ] && exit 0
+# A one-shot with no backstop was the last silent path in the lifecycle. If the
+# checkpoint turn is interrupted (ESC, a text-only reply, or a Bash call, which
+# this hook permits), no progress file is ever written, yet FLAG suppressed every
+# later fire - PENDING stayed set forever, DONE never latched so the guard above
+# never engaged, and the session ran to auto-compaction unsaved with no record.
+# Re-assert while the checkpoint is still owed, escalating to a hard deny.
+if [ -f "$FLAG" ]; then
+  [ -f "/tmp/baton-pending-${SESSION_ID}" ] || exit 0
+  # NEVER impede the one write that clears PENDING. The re-assert below escalates
+  # to a hard deny, but this is a PreToolUse hook - it fires BEFORE the tool runs,
+  # and PENDING is cleared only by checkpoint-write-trigger's PostToolUse AFTER a
+  # progress-*.md Write completes. Without this exemption the deny would block the
+  # progress-file write itself, deadlocking the very checkpoint the nag demands -
+  # re-creating the silent-loss class this whole change closes. So let a Write/Edit
+  # to a progress-*.md path through untouched (do not even count it as a nag).
+  _CC_FP=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+  case "${TOOL_NAME}:$(basename -- "${_CC_FP:-x}")" in
+    Write:progress-*.md|Edit:progress-*.md|MultiEdit:progress-*.md) exit 0 ;;
+  esac
+  NAG_FILE="/tmp/baton-nag-${SESSION_ID}"
+  NAG=$(cat "$NAG_FILE" 2>/dev/null || echo 0)
+  [[ "$NAG" =~ ^[0-9]+$ ]] || NAG=0
+  NAG=$((NAG + 1))
+  echo "$NAG" > "$NAG_FILE"
+  log_event "$PROJECT_DIR" checkpoint pending-unsatisfied \
+    "session_id=$SESSION_ID" "attempt=$NAG" 2>/dev/null || true
+  if [ "$NAG" -ge "${_CC_NAG_LIMIT:-3}" ]; then
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "CHECKPOINT STILL UNSAVED. The progress file was never written, so this session cannot be handed off. Write it now to the path given in the checkpoint instruction. Do NOT tell the user to /clear."
+      }
+    }'
+  else
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: "CHECKPOINT STILL PENDING - the progress file has not been written yet. Stop other work and write it before continuing. If subagents are still running, let them return and fold their results into the checkpoint first, so nothing in flight is lost."
+      }
+    }'
+  fi
+  exit 0
+fi
 touch "$FLAG"
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$CWD}"
 TRACKING_DIR="$(checkpoint_dir "$PROJECT_DIR")"
 SESSIONS_DIR="$(checkpoint_progress_dir "$PROJECT_DIR")"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -211,6 +274,65 @@ if [ -f "$POINTER" ]; then
   fi
 fi
 
+# Whitelist before use: both reads above take WORKSTREAM from an on-disk JSON
+# record, and it becomes a path component below. Blanking is safe here - the
+# recovery ladder immediately below reacquires or mints.
+case "$WORKSTREAM" in
+  *[!A-Za-z0-9._-]*) WORKSTREAM="" ;;
+esac
+
+# Recovery ladder. The WRITE path used to consult ONLY terminals/<hash>.json; when
+# that missed, the checkpoint went to progress-unassociated-*.md, the PostToolUse
+# guard rejected it, and the handoff was lost silently. Rung 1: reacquire by
+# session_id and rebind this terminal. Rung 2: mint. After this block WORKSTREAM is
+# always non-empty, so there is no unassociated write path left.
+if [ -z "$WORKSTREAM" ]; then
+  WORKSTREAM=$(find_workstream_by_session_id "$TRACKING_DIR" "$SESSION_ID" 2>/dev/null || true)
+  case "$WORKSTREAM" in
+    *[!A-Za-z0-9._-]*) WORKSTREAM="" ;;
+  esac
+  if [ -n "$WORKSTREAM" ]; then
+    rebind_terminal "$TRACKING_DIR" "$WORKSTREAM"
+    log_event "$PROJECT_DIR" checkpoint reacquire-by-session-id \
+      "workstream=$WORKSTREAM" "session_id=$SESSION_ID" 2>/dev/null || true
+  fi
+fi
+if [ -z "$WORKSTREAM" ]; then
+  # Nothing to reacquire - mint, so the checkpoint always has a real home.
+  # Naming follows session-start's shape: <branch-slug>-<stamp>-<hash6>.
+  #
+  # The branch read is NOT session-start's one-liner, deliberately - see the note
+  # below. Assign first, test the exit status separately, then whitelist the value.
+  _CC_BRANCH=$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null) || _CC_BRANCH=""
+  case "$_CC_BRANCH" in
+    ""|HEAD|*[!A-Za-z0-9._/-]*) _CC_BRANCH="main" ;;
+  esac
+  _CC_BRANCH_SLUG=$(echo "$_CC_BRANCH" | sed 's|/|-|g')
+  WORKSTREAM="${_CC_BRANCH_SLUG}-$(date +%Y%m%d-%H%M%S)-${TERM_HASH:0:6}"
+  _CC_DISPLAY=$(derive_display_name "$CWD" "$PROJECT_DIR" "$WORKSTREAM")
+  _CC_NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mkdir -p "$TRACKING_DIR/workstreams"
+  # Track whether the mint actually landed. A read-only or full .baton makes the
+  # record write or the rebind fail; logging mint-workstream unconditionally would
+  # record a mint that never happened, and the log is the one artifact an operator
+  # consults. The downstream PostToolUse block still catches the failure - this
+  # only makes it observable at the point it occurs.
+  _CC_MINT_OK=1
+  jq -n --arg ws "$WORKSTREAM" --arg dn "$_CC_DISPLAY" --arg ts "$_CC_NOW" \
+        --arg pd "$CWD" --arg sid "$SESSION_ID" \
+    '{workstream:$ws, display_name:$dn, progress_file:"", phase:"unknown",
+      updated_at:$ts, project_dir:$pd, session_id:$sid}' \
+    | atomic_write "$TRACKING_DIR/workstreams/${WORKSTREAM}.json" || _CC_MINT_OK=0
+  rebind_terminal "$TRACKING_DIR" "$WORKSTREAM" || _CC_MINT_OK=0
+  if [ "$_CC_MINT_OK" = 1 ]; then
+    log_event "$PROJECT_DIR" checkpoint mint-workstream \
+      "workstream=$WORKSTREAM" "session_id=$SESSION_ID" 2>/dev/null || true
+  else
+    log_event "$PROJECT_DIR" checkpoint mint-failed \
+      "workstream=$WORKSTREAM" "session_id=$SESSION_ID" 2>/dev/null || true
+  fi
+fi
+
 # Mark progress files for archival - actual move deferred to checkpoint-write-trigger
 # so the pointer stays valid until the new file is written.
 # Only archive THIS terminal's files (by hash) to avoid cross-terminal collision.
@@ -232,48 +354,55 @@ done
 # Set pending marker for write-trigger hook to detect
 echo "$PCT" > "/tmp/baton-pending-${SESSION_ID}"
 _CC_PENDING="true"
-record_checkpoint "$PCT" "" 0 2>/dev/null || true
+# The trigger itself must be observable. Without this, hook-events.jsonl cannot
+# distinguish "never triggered" from "triggered and silently dropped" - only the
+# reacquire/mint branches logged, so an ordinary successful trigger left no trace.
+log_event "$PROJECT_DIR" checkpoint triggered \
+  "pct=$PCT" "workstream=$WORKSTREAM" "session_id=$SESSION_ID" 2>/dev/null || true
 
 # Compute the exact absolute path Claude should write to, and resolve active template.
 # Path is per-terminal scoped (TERM_HASH) to avoid cross-terminal collision.
 TEMPLATE_PATH="$(tpl::resolve_active_template "$PROJECT_DIR")"
-if [ -n "$WORKSTREAM" ]; then
-  PROGRESS_PATH="$(checkpoint_progress_dir "$PROJECT_DIR")/progress-${WORKSTREAM}-${TERM_HASH}.md"
-else
-  PROGRESS_PATH="$(checkpoint_progress_dir "$PROJECT_DIR")/progress-unassociated-$(date +%Y%m%d-%H%M%S).md"
-fi
+# WORKSTREAM is guaranteed non-empty by the recovery ladder above.
+PROGRESS_PATH="$(checkpoint_progress_dir "$PROJECT_DIR")/progress-${WORKSTREAM}-${TERM_HASH}.md"
 
 # Locate most recent prior progress file for this workstream - drives the
 # <<ARCHIVED_CHECKBOXES>> carry-forward in tpl::render_progress_file. Looks first
 # at the active progress directory, then at the archive (the prior session's
 # write-trigger may have already moved the most recent file).
 _find_prior_progress() {
-  local ws="$1" tracking_dir="$2"
-  local active_dir="$tracking_dir/progress" archive_dir="$tracking_dir/archive/progress"
-  local newest=""
-  newest=$(ls -t "$active_dir"/progress-"$ws"-*.md 2>/dev/null | head -1)
+  local ws="$1" project_dir="$2"
+  # active_dir was hardcoded to "$tracking_dir/progress", diverging from
+  # checkpoint_progress_dir() (which honours BATON_PROGRESS_DIR) used everywhere
+  # else in this hook; archive_dir pointed at "$tracking_dir/archive/progress",
+  # which has NO writer at all - the only progress archiver writes to
+  # $(archive_dir)/progress/<YYYY-MM>. Both misses silently blanked
+  # <<ARCHIVED_CHECKBOXES>>, and V8 stayed satisfied because the token WAS
+  # substituted. The scaffold exclusion matters because the leftover
+  # .scaffold.md matches this glob and is necessarily newer than the real file.
+  # NOTE: the local is archive_ROOT, not archive_dir. `archive_dir` is a
+  # FUNCTION in workstream-lib.sh; a local of that name shadows it and the
+  # command substitution below would recurse into the variable instead of
+  # calling the helper. The old code got away with the name only because it
+  # never called the function.
+  local active_dir archive_root newest=""
+  active_dir="$(checkpoint_progress_dir "$project_dir")"
+  archive_root="$(archive_dir)/progress"
+  newest=$(ls -t "$active_dir"/progress-"$ws"-*.md 2>/dev/null | grep -v '\.scaffold\.md$' | head -1)
   if [ -z "$newest" ]; then
-    newest=$(find "$archive_dir" -name "progress-${ws}-*.md" -type f 2>/dev/null \
-      | xargs -r ls -t 2>/dev/null | head -1)
+    newest=$(find "$archive_root" -name "progress-${ws}-*.md" -type f 2>/dev/null \
+      | grep -v '\.scaffold\.md$' | xargs -r ls -t 2>/dev/null | head -1)
   fi
   printf '%s' "$newest"
 }
-if [ -n "$WORKSTREAM" ]; then
-  ROLLOFF_PRIOR_PROGRESS="$(_find_prior_progress "$WORKSTREAM" "$TRACKING_DIR")"
-else
-  ROLLOFF_PRIOR_PROGRESS=""
-fi
+ROLLOFF_PRIOR_PROGRESS="$(_find_prior_progress "$WORKSTREAM" "$PROJECT_DIR")"
 export ROLLOFF_PRIOR_PROGRESS
 
 # Render the HOOK-FILLED placeholders into a scaffold the model can fill in.
 # tpl::render_progress_file reads ROLLOFF_PRIOR_PROGRESS to substitute
 # <<ARCHIVED_CHECKBOXES>> from the prior file's ## Archived body.
 SCAFFOLD_PATH="${PROGRESS_PATH%.md}.scaffold.md"
-if [ -n "$WORKSTREAM" ]; then
-  tpl::render_progress_file "$TEMPLATE_PATH" "$WORKSTREAM" "$PROJECT_DIR" > "$SCAFFOLD_PATH" 2>/dev/null || cp "$TEMPLATE_PATH" "$SCAFFOLD_PATH"
-else
-  cp "$TEMPLATE_PATH" "$SCAFFOLD_PATH"
-fi
+tpl::render_progress_file "$TEMPLATE_PATH" "$WORKSTREAM" "$PROJECT_DIR" > "$SCAFFOLD_PATH" 2>/dev/null || cp "$TEMPLATE_PATH" "$SCAFFOLD_PATH"
 
 # Extract the literal Session Directive block from the active template for V2 re-injection.
 DIRECTIVE_BLOCK=$(awk '/^## Session Directive$/{flag=1; next} /^## /{flag=0} flag' "$TEMPLATE_PATH" 2>/dev/null || echo "")
