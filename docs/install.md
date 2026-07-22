@@ -63,8 +63,8 @@ bash tools/install.sh --target /path/to/your/project
 
 The installer:
 - validates dependencies (jq, flock, GNU grep/find, md5sum, bash 4.4+),
-- walks you through 5 first-time-setup prompts (interactive mode - default when stdin is a TTY),
-- merges 10 hook commands into `~/.claude/settings.json` (idempotent - re-run is a no-op): via `merge-settings.sh` - SessionStart, PreToolUse, PostToolUse (checkpoint-write + the opt-in `outcome-proxy-code-execution`), SessionEnd, UserPromptSubmit (project-detect + the opt-in `outcome-proxy-retry-density`); plus three inline jq blocks - PostToolBatch (`post-tool-batch`, cost telemetry), PostToolUse:`tool-timing`, and SubagentStop (`post-subagent-cost`). The two outcome-proxy hooks no-op unless `BATON_OUTCOME_PROXIES=1`,
+- walks you through 6 first-time-setup prompts (interactive mode - default when stdin is a TTY),
+- merges 11 hook commands into `~/.claude/settings.json` (idempotent - re-run is a no-op): eight via `merge-settings.sh` - SessionStart, PreToolUse, PostToolUse (checkpoint-write + the opt-in `outcome-proxy-code-execution`), SessionEnd, UserPromptSubmit (project-detect + the opt-in `outcome-proxy-retry-density`), Stop (`stop-relaunch-trigger`, the relaunch driver); plus three inline jq blocks - PostToolBatch (`post-tool-batch`, cost telemetry), PostToolUse:`tool-timing`, and SubagentStop (`post-subagent-cost`). The two outcome-proxy hooks no-op unless `BATON_OUTCOME_PROXIES=1`,
 - copies the statusline shim to `~/.claude/baton-pct.sh`,
 - appends `.baton/` to the target project's `.gitignore`,
 - prints an optional crontab line (the cleanup sweep already runs automatically on session start; the crontab is only a fallback for machines where Claude Code sessions are infrequent).
@@ -121,7 +121,7 @@ Checkpoint hooks are append-only against your existing settings.json `hooks` arr
 
 ## First-time Setup
 
-The installer asks 5 questions. Defaults are sensible for the common case; override when your layout differs.
+The installer asks 6 questions. Defaults are sensible for the common case; override when your layout differs.
 
 > **Note:** the prompt text below is verbatim from `tools/install.sh`. A CI check (`test-prompt-sync.sh`) enforces this. If you're editing one, edit the other.
 
@@ -183,6 +183,17 @@ Optional: how should this terminal name its workstream? (BATON_DISPLAY_NAME)
 - **Override when:** you want display names derived from PWD or git branch. **Read at `claude` launch time** - re-export between sessions (e.g. from a `cd` hook) for the value to change with directory.
 - **Shell rc:** `export BATON_DISPLAY_NAME="$(basename "$PWD")"`
 
+### 6. Auto-continue + `baton` alias (optional)
+
+```
+Install a `baton` launch alias for auto-continue? (opt-in, default no)
+  Adds a baton alias for tools/baton-run.sh to your shell rc. The alias launches Claude with your configured auto-continue driver (default relaunch; switch with /baton set auto_continue_mode=tmux).
+```
+
+- **Default:** `no` (nothing is changed)
+- **Opt in when:** you want `baton` to launch Claude with your selected auto-continue driver (tmux or relaunch). Non-interactive installs opt in with `BATON_ENABLE_AUTOCONTINUE=yes`.
+- **Effect:** writes a marker-guarded `alias baton='bash <pass-the-baton-repo>/tools/baton-run.sh'` to your shell rc, and persists `auto_continue_mode=relaunch` only when no driver is already selected.
+
 <!-- PROMPT-SYNC-END -->
 
 ## Verify After Install
@@ -191,7 +202,7 @@ Optional: how should this terminal name its workstream? (BATON_DISPLAY_NAME)
 bash tools/verify-install.sh
 ```
 
-Checks: each of the 5 core hook events (SessionStart, PreToolUse, PostToolUse, SessionEnd, UserPromptSubmit) has a checkpoint hook registered, statusline tick file appears within ~1s, full test suite passes (114 test scripts), idempotency re-run is a no-op.
+Checks: each of the 5 core hook events (SessionStart, PreToolUse, PostToolUse, SessionEnd, UserPromptSubmit) has a checkpoint hook registered, statusline tick file appears within ~1s, full test suite passes (141 test scripts), idempotency re-run is a no-op.
 
 `--pre-commit-only` runs the S2 smoke (E1-only path) for fast pre-commit gating.
 

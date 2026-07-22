@@ -8,6 +8,16 @@ All notable changes to Pass the Baton are documented here. The format is based o
 
 ---
 
+## [0.4.0] - 2026-07-22
+
+### Added
+
+- **`baton` launch alias.** Opt in at install (the 6th setup prompt) or with `/baton set launch_alias=<name>`, then launch Claude with `baton` instead of `claude`. The alias follows your configured auto-continue driver and writes a marker-guarded alias block to your shell rc.
+- **Auto-continue drivers via `auto_continue_mode`** (`off` / `tmux` / `relaunch`). `tmux` drives `/clear` + a continue nudge into the pane after a checkpoint; `relaunch` runs a fresh-session supervisor loop. Select with `/baton set auto_continue_mode=...`; the installer seeds `relaunch` as the default only when no driver is already configured (a preselected `tmux`, including the legacy `BATON_AUTO_CONTINUE=1`, is preserved).
+- **`/pass-the-baton:renew` fires a checkpoint on demand.** Run it to save-and-hand-off immediately, before the context-fill threshold is reached - useful when you want to end a session cleanly at a natural stopping point. It runs the identical checkpoint path as an automatic threshold crossing and is independent of the reported context percentage.
+
+---
+
 ## [0.3.3] - 2026-07-20
 
 The "no silent handoffs" release: every way a checkpoint could fail to save now either blocks or leaves a record. Previously several of them did neither, and the session looked saved when it was not.

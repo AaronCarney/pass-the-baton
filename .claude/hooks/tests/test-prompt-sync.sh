@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-prompt-sync.sh - enforce verbatim parity of the 5 first-time-setup
+# test-prompt-sync.sh - enforce verbatim parity of the 6 first-time-setup
 # prompts across install.sh, install.md, and the install-baton SKILL.md.
 set -u
 
@@ -27,9 +27,9 @@ prompts_install_sh() {
   awk '/PROMPT-SYNC-BEGIN/{flag=1; next} /PROMPT-SYNC-END/{flag=0} flag' \
     "$REPO_DIR/tools/install.sh" \
   | awk '
-    /^P[1-5]_TEXT='"'"'/ {
+    /^P[1-6]_TEXT='"'"'/ {
       in_text=1
-      sub(/^P[1-5]_TEXT='"'"'/, "")
+      sub(/^P[1-6]_TEXT='"'"'/, "")
       if (/'"'"'$/) { sub(/'"'"'$/, ""); in_text=0 }
       print; next
     }

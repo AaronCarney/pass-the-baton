@@ -226,6 +226,13 @@ checkpoint or a resume.
 | `BATON_SWEEP_INTERVAL_HOURS` | `48` | Self-throttle interval for the cleanup sweep (the `--if-due` gate in `cleanup-cron.sh`). **Does not set cron frequency** - `install-cron.sh` prints a fixed `0 0 */2 * *` crontab line (every two days); this var only gates whether an invoked sweep actually runs. |
 | `BATON_CRON_LOG` | `$HOME/.cache/baton/cron.log` | Where the cleanup cron writes its log. |
 | `BATON_DISPLAY_NAME` | (auto-generated) | Optional human-readable label for this terminal's workstream. Read at `claude` launch time. |
+| `BATON_AUTO_CONTINUE` | `0` | Legacy tmux enable flag. Set to `1` and run inside tmux to arm the tmux auto-continue driver; any other value or no tmux leaves it off. Acts as the default the mode selector consults when no mode is set at any layer. |
+| `BATON_AUTO_CONTINUE_MODE` | `off` | Auto-continue driver selector: `off`, `tmux`, or `relaunch`. Resolved env > `config.json` `auto_continue_mode` > default `off`; an unrecognized value resolves to `off`. |
+| `BATON_AUTO_CONTINUE_NUDGE` | `proceed` | tmux driver: the text sent after `/clear` to start the next session working on the injected progress. |
+| `BATON_AUTO_CONTINUE_LOG` | `${TMPDIR:-/tmp}/baton-auto-continue.log` | tmux driver: audit log of every committed injector action (`continued`, `cleared-not-continued-prompt-timeout`, `fail-*`). |
+| `BATON_AUTO_CONTINUE_BIN` | `tools/baton-auto-continue.sh` | tmux driver: override path to the injector binary (test/advanced seam). |
+| `BATON_RELAUNCH_MAX` | `10` | relaunch driver: cap on relaunches per `baton-run` invocation. A non-numeric value falls back to `10` rather than uncapping. |
+| `BATON_RELAUNCH_LOG` | `${TMPDIR:-/tmp}/baton-relaunch.log` | relaunch driver: audit log of every committed relaunch action (`armed`, `relaunch`, `stop-*`). |
 | `WORKSTREAM` | (unset) | Explicit binding. Corrupt referenced JSON exits 1; missing fresh-creates. |
 | `BATON_COLLECT` | `0` | Global override that opens event-log collection with no arc. Env var, or the verbatim `BATON_COLLECT` key in `config.json` (set via the `/baton` dashboard). |
 | `BATON_EVENT_LOG_DISABLE` | `0` | Hard kill-switch - suppresses all `envelope::emit` output, overriding even an open arc. |
@@ -236,6 +243,11 @@ checkpoint or a resume.
 | `BATON_TUNE_SAFETY_MAX` | `50` | Upper bound the tuner will never set the threshold above. Placeholder. `tune_safety_max`. |
 | `BATON_TUNE_DWELL_SECONDS` | `86400` | Minimum seconds between applied adjustments (rate-limit). Placeholder. `tune_dwell_seconds`. |
 | `BATON_TUNE_SCORE_FN` | `score_hold` | Name of the scoring function the tuner uses. The default `score_hold` is a guaranteed no-op (returns the setpoint, so every cycle decides HOLD). `tune_score_fn`. |
+
+**Auto-continue notes.**
+
+- The `baton` launch alias now honors the selected `auto_continue_mode` driver (`tmux` or `relaunch`), not relaunch-only.
+- `/pass-the-baton:renew` fires a manual early checkpoint on demand, running the same save-and-handoff path as a threshold crossing.
 
 **config.json wiring (CC6).** The `/baton` dashboard persists every variable above to
 `config.json`. Most consumers read through `_cfg::get` (`lib/config.sh`), honoring

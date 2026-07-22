@@ -7,6 +7,7 @@ export XDG_CONFIG_HOME="$TMP/cfg"
 mkdir -p "$XDG_CONFIG_HOME/baton"
 export BATON_DIR="$TMP/.baton"
 mkdir -p "$BATON_DIR"
+export HOME="$TMP/home"; mkdir -p "$HOME"
 PASS=0; FAIL=0
 _aeq() { if [ "$1" = "$2" ]; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL: expected %q got %q (%s)\n' "$1" "$2" "${3:-}" >&2; fi; }
 _acontains() { case "$1" in *"$2"*) PASS=$((PASS+1));; *) FAIL=$((FAIL+1)); printf 'FAIL: %q not found in output (%s)\n' "$2" "${3:-}" >&2;; esac; }
@@ -357,6 +358,102 @@ _aeq 7  "$(e4_val 'BATON_TRACKING_TTL_DAYS:')" 'tracking ttl default row shows 7
 _aeq 24 "$(e4_val 'BATON_TMP_TTL_HOURS:')" 'tmp ttl default row shows 24 (from helper)'
 # Footnote single-sources the bounds fallback to the constant (not a literal 23).
 ! bash "$DASH" show 2>/dev/null | grep -q 'else 23' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: footnote still hardcodes else 23' >&2; }
+
+# === launch_alias + tmux-knob retrofit + display-honesty ===
+
+# show surfaces the new rows.
+show_out=$(bash "$DASH" show)
+for k in launch_alias BATON_AUTO_CONTINUE_NUDGE BATON_AUTO_CONTINUE_LOG BATON_AUTO_CONTINUE_BIN; do
+  _acontains "$show_out" "$k" "$k row present"
+done
+
+# launch_alias valid: persists + writes the marker block to the sandbox rc.
+rm -f "$HOME/.bashrc"
+bash "$DASH" set launch_alias=mybaton >/dev/null
+_aeq mybaton "$(jq -r '.launch_alias' "$XDG_CONFIG_HOME/baton/config.json")" 'launch_alias persisted'
+ok_block=$(grep -c 'baton launch alias' "$HOME/.bashrc" 2>/dev/null || echo 0)
+[ "$ok_block" -ge 1 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: launch_alias should write rc marker block' >&2; }
+grep -qE "alias mybaton='bash .*/tools/baton-run.sh'" "$HOME/.bashrc" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: rc alias mybaton target must be tools/baton-run.sh' >&2; }
+
+# launch_alias invalid (builtin) rejected with a reason.
+set +e
+out=$(bash "$DASH" set launch_alias=cd 2>&1); rc=$?
+set -e
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: launch_alias=cd (builtin) should reject' >&2; }
+_acontains "$out" 'builtin' 'reject reason names builtin'
+
+# launch_alias empty (rc1) rejected with the empty reason.
+set +e
+out=$(bash "$DASH" set launch_alias= 2>&1); rc=$?
+set -e
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: launch_alias= (empty) should reject' >&2; }
+_acontains "$out" 'cannot be empty' 'empty reject reason names cannot be empty'
+
+# launch_alias keyword (rc4) rejected with the keyword reason.
+set +e
+out=$(bash "$DASH" set launch_alias=for 2>&1); rc=$?
+set -e
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: launch_alias=for (keyword) should reject' >&2; }
+_acontains "$out" 'keyword' 'keyword reject reason names keyword'
+
+# launch_alias that resolves on PATH (rc5 shadow) rejected - reachable after the sentinel
+# fix (the previously-persisted alias is the reclaim sentinel, not the new value).
+set +e
+out=$(bash "$DASH" set launch_alias=ls 2>&1); rc=$?
+set -e
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: launch_alias=ls (PATH shadow) should reject' >&2; }
+_acontains "$out" 'resolves on PATH' 'shadow reject reason names PATH'
+
+# tmux-knob retrofit: set persists via config.json.
+bash "$DASH" set BATON_AUTO_CONTINUE_NUDGE=go >/dev/null
+_aeq go "$(jq -r '.BATON_AUTO_CONTINUE_NUDGE' "$XDG_CONFIG_HOME/baton/config.json")" 'NUDGE persisted'
+# Config-honesty: the dashboard-set value resolves through _cfg::get the way the injector
+# (tools/baton-auto-continue.sh) now reads it - persisted AND honored, not just persisted.
+resolved=$(unset BATON_AUTO_CONTINUE_NUDGE; source "$REPO/lib/config.sh"; _cfg::get BATON_AUTO_CONTINUE_NUDGE proceed)
+_aeq go "$resolved" 'config.json NUDGE honored by _cfg::get (injector resolution)'
+grep -q '_cfg::get BATON_AUTO_CONTINUE_NUDGE' "$REPO/tools/baton-auto-continue.sh" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: injector must resolve NUDGE via _cfg::get' >&2; }
+# Config-honesty (execution): the config.json-set NUDGE must reach the injector's actual
+# `tmux send-keys -l` output, not merely resolve via _cfg::get. Run the real injector against
+# a fake tmux shim that reports a ready pane and records the literal text it sends.
+_shimdir="$TMP/tmuxshim"; mkdir -p "$_shimdir"
+cat > "$_shimdir/tmux" <<'SHIM'
+#!/usr/bin/env bash
+sub="$1"; shift
+if [ "$sub" = capture-pane ]; then printf 'ready$ \n'; exit 0; fi
+if [ "$sub" = send-keys ]; then
+  _lit=0; _last=""
+  for _a in "$@"; do [ "$_a" = "-l" ] && _lit=1; _last="$_a"; done
+  [ "$_lit" = 1 ] && printf '%s\n' "$_last" >> "$NUDGE_REC"
+fi
+exit 0
+SHIM
+chmod +x "$_shimdir/tmux"
+bash "$DASH" set BATON_AUTO_CONTINUE_NUDGE=go >/dev/null
+NUDGE_REC="$TMP/nudge.rec"; : > "$NUDGE_REC"
+_donef="$TMP/done.flag"; : > "$_donef"
+(
+  export PATH="$_shimdir:$PATH" NUDGE_REC BATON_AUTO_CONTINUE=1
+  unset BATON_AUTO_CONTINUE_NUDGE
+  _AUTO_CONTINUE_POLL_INTERVAL=0.01 _AUTO_CONTINUE_POLL_MAX_SECONDS=2 \
+    bash "$REPO/tools/baton-auto-continue.sh" nudge-exec-$$ "$_donef" '%9' >/dev/null 2>&1
+)
+grep -qx go "$NUDGE_REC" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: injector must send config.json NUDGE (go) verbatim to tmux' >&2; }
+
+set +e
+bash "$DASH" set BATON_AUTO_CONTINUE_LOG= >/dev/null 2>&1; rc=$?
+set -e
+[ "$rc" != '0' ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: empty NUDGE/LOG should reject' >&2; }
+
+# Display-honesty: a config.json BATON_DIR value must NOT surface in show (env-only consumer).
+jq '.BATON_DIR="/tmp/leak-dir"' "$XDG_CONFIG_HOME/baton/config.json" > "$TMP/c.json" && mv "$TMP/c.json" "$XDG_CONFIG_HOME/baton/config.json"
+hon=$(unset BATON_DIR; bash "$DASH" show)
+case "$hon" in *"/tmp/leak-dir"*) FAIL=$((FAIL+1)); echo 'FAIL: show must not surface config.json BATON_DIR' >&2;; *) PASS=$((PASS+1));; esac
+
+# Display-honesty: same for BATON_PROJECT_DIR (env-only consumer; config.json must not surface).
+jq '.BATON_PROJECT_DIR="/tmp/leak-projdir"' "$XDG_CONFIG_HOME/baton/config.json" > "$TMP/c.json" && mv "$TMP/c.json" "$XDG_CONFIG_HOME/baton/config.json"
+honp=$(unset BATON_PROJECT_DIR; bash "$DASH" show)
+case "$honp" in *"/tmp/leak-projdir"*) FAIL=$((FAIL+1)); echo 'FAIL: show must not surface config.json BATON_PROJECT_DIR' >&2;; *) PASS=$((PASS+1));; esac
 
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ]

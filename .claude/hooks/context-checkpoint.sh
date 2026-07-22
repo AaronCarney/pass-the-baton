@@ -137,6 +137,13 @@ if [ ! -f "$_T7_TOOLS_FLAG" ]; then
 fi
 # E8-T7: tools_changed end
 
+# Manual early checkpoint (/pass-the-baton:renew). A per-session force flag makes the
+# checkpoint fire regardless of the reported context %, running the SAME path as a
+# threshold crossing. Consumed here so one /renew arms exactly one checkpoint.
+FORCE_FLAG="/tmp/baton-force-checkpoint-${SESSION_ID}"
+_CC_FORCE=""
+if [ -f "$FORCE_FLAG" ]; then _CC_FORCE=1; rm -f "$FORCE_FLAG"; fi
+
 PCT=$(cat "/tmp/claude-context-pct-${SESSION_ID}" 2>/dev/null)
 _CC_PCT="$PCT"
 
@@ -152,7 +159,7 @@ if [ -z "$PCT" ]; then
 elif ! [[ "$PCT" =~ ^[0-9]+$ ]]; then
   _CC_PCT_BAD="malformed"
 fi
-if [ -n "$_CC_PCT_BAD" ]; then
+if [ -z "$_CC_FORCE" ] && [ -n "$_CC_PCT_BAD" ]; then
   COUNT_FILE="/tmp/baton-health-${SESSION_ID}"
   COUNT=$(cat "$COUNT_FILE" 2>/dev/null || echo 0)
   [[ "$COUNT" =~ ^[0-9]+$ ]] || COUNT=0
@@ -176,11 +183,17 @@ if [ -n "$_CC_PCT_BAD" ]; then
   fi
   exit 0
 fi
-[ "$PCT" -lt "$CC_THRESHOLD" ] && exit 0
-
+# Forced with no usable % - synthesize a valid number for the comparisons/logs below.
+if [ -n "$_CC_FORCE" ] && ! [[ "$PCT" =~ ^[0-9]+$ ]]; then PCT="$CC_THRESHOLD"; fi
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$CWD}"
 FLAG="/tmp/claude-context-triggered-${SESSION_ID}"
 DONE="/tmp/baton-done-${SESSION_ID}"
+
+# The DONE guard and the nag re-assert run BEFORE the threshold early-exit below, so a
+# checkpoint that is owed (FLAG set + PENDING) or done (DONE) keeps being enforced even if the
+# reported context % dips back under the threshold - the earlier placement let such a session
+# stop being nagged with a save still owed. A fresh call with FLAG unset falls through both
+# blocks to the threshold exit, so a below-threshold session with nothing owed triggers nothing.
 
 # If checkpoint save already completed, block further work
 if [ -f "$DONE" ]; then
@@ -239,6 +252,9 @@ if [ -f "$FLAG" ]; then
   fi
   exit 0
 fi
+
+# Below the threshold with no checkpoint owed (FLAG unset): nothing to do on this call.
+[ -z "$_CC_FORCE" ] && [ "$PCT" -lt "$CC_THRESHOLD" ] && exit 0
 touch "$FLAG"
 
 TRACKING_DIR="$(checkpoint_dir "$PROJECT_DIR")"
@@ -354,6 +370,12 @@ done
 # Set pending marker for write-trigger hook to detect
 echo "$PCT" > "/tmp/baton-pending-${SESSION_ID}"
 _CC_PENDING="true"
+# Parent-sid map mtime refresh (durable fix for the dashboard fail-open documented in
+# baton-dashboard.sh): the guard keys on /tmp/claude-parent-sid-<term_hash>, whose mtime was
+# pinned at session start and swept by the /tmp TTL, so a long single session could lose its
+# map while a live flag remains. Touch it here, on the checkpoint WRITE path, so the map
+# outlives the session. TERM_HASH is already resolved above.
+[ -n "$TERM_HASH" ] && touch "/tmp/claude-parent-sid-${TERM_HASH}" 2>/dev/null || true
 # The trigger itself must be observable. Without this, hook-events.jsonl cannot
 # distinguish "never triggered" from "triggered and silently dropped" - only the
 # reacquire/mint branches logged, so an ordinary successful trigger left no trace.

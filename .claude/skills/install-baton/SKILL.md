@@ -27,7 +27,7 @@ If they have cloned it, ask for the absolute path. Treat that path as `<repo>` f
 
 The target is the project the user invoked Claude from - the repo where they spend Claude Code sessions - NOT the clone of Pass the Baton itself. Default: `$PWD` at skill invocation time. If `$PWD` is inside the Pass the Baton clone, walk up to the parent project or ask the user.
 
-### Step 2b: Present the 5 setup questions
+### Step 2b: Present the 6 setup questions
 
 Ask each in turn using your question UX. Defaults shown below. The prompt text is **canonical** - it matches `tools/install.sh` and `docs/install.md` verbatim (CI-enforced).
 
@@ -79,11 +79,20 @@ Optional: how should this terminal name its workstream? (BATON_DISPLAY_NAME)
 
 Default: empty (auto-generated timestamp)
 
+#### Q6 - Auto-continue + `baton` alias (optional)
+
+```
+Install a `baton` launch alias for auto-continue? (opt-in, default no)
+  Adds a baton alias for tools/baton-run.sh to your shell rc. The alias launches Claude with your configured auto-continue driver (default relaunch; switch with /baton set auto_continue_mode=tmux).
+```
+
+Default: `no`. Opt in by passing `BATON_ENABLE_AUTOCONTINUE=yes` to the installer.
+
 <!-- PROMPT-SYNC-END -->
 
 ### Step 3: Run the installer
 
-With the 5 values collected, run:
+With the 6 values collected, run:
 
 ```bash
 BATON_DIR="<q1-answer>" \
@@ -91,6 +100,7 @@ BATON_PROGRESS_DIR="<q2-answer>" \
 BATON_ARCHIVE_DIR="<q3-answer>" \
 BATON_PROJECT_DIR="<q4-answer>" \
 BATON_DISPLAY_NAME="<q5-answer>" \
+BATON_ENABLE_AUTOCONTINUE="<q6-answer>" \
 bash <repo>/tools/install.sh --non-interactive --target "<q4-answer>"
 ```
 
@@ -147,6 +157,6 @@ Close with the literal line:
 ## Important
 
 - This skill is OSS-generic. No project-specific assumptions.
-- The 5 prompt blocks above are CI-enforced to byte-match `tools/install.sh` and `docs/install.md`. Edit one, edit all three.
+- The 6 prompt blocks above are CI-enforced to byte-match `tools/install.sh` and `docs/install.md`. Edit one, edit all three.
 - Users without Claude Code (or who prefer a scripted install) can run `bash tools/install.sh --interactive` directly for the same flow; plugin users get the hooks via `/plugin install` and only need this skill for the statusline.
 - Each durable-write step (statusline, crontab) has its own confirm - do NOT bundle them. The rest of the flow is autonomous with defaults.

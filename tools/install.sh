@@ -75,7 +75,7 @@ esac
 unset _ccp_probe_state _ccp_fstype
 
 # 3. First-time-setup prompts (interactive only).
-#    These 5 blocks are the CANONICAL SOURCE for the prompt-sync sub-gate.
+#    These 6 blocks are the CANONICAL SOURCE for the prompt-sync sub-gate.
 #    docs/install.md and .claude/skills/install-baton/SKILL.md must
 #    render these prompts verbatim. Edit them here first; T14 enforces.
 ask() {
@@ -91,7 +91,7 @@ ask() {
 
 if [ "$INTERACTIVE" = "1" ]; then
   echo ""
-  echo "=== First-time setup - 5 prompts ==="
+  echo "=== First-time setup - 6 prompts ==="
   echo "Press Enter to accept each default."
   echo ""
 fi
@@ -117,6 +117,10 @@ P5_TEXT='Optional: how should this terminal name its workstream? (BATON_DISPLAY_
   Examples - basename: "${PWD##*/}"   git branch: "$(git symbolic-ref --short HEAD 2>/dev/null)"
   Leave blank for the auto-generated timestamp name.'
 P5_DEFAULT=""
+
+P6_TEXT='Install a `baton` launch alias for auto-continue? (opt-in, default no)
+  Adds a baton alias for tools/baton-run.sh to your shell rc. The alias launches Claude with your configured auto-continue driver (default relaunch; switch with /baton set auto_continue_mode=tmux).'
+P6_DEFAULT="no"
 # <<< PROMPT-SYNC-END
 
 if [ "$INTERACTIVE" = "1" ]; then
@@ -125,12 +129,14 @@ if [ "$INTERACTIVE" = "1" ]; then
   BATON_ARCHIVE_DIR_ANS=$(ask BATON_ARCHIVE_DIR "$P3_DEFAULT" "$P3_TEXT")
   BATON_PROJECT_DIR_ANS=$(ask BATON_PROJECT_DIR "$P4_DEFAULT" "$P4_TEXT")
   BATON_DISPLAY_NAME_ANS=$(ask BATON_DISPLAY_NAME "$P5_DEFAULT" "$P5_TEXT")
+  BATON_ENABLE_AUTOCONTINUE_ANS=$(ask BATON_ENABLE_AUTOCONTINUE "$P6_DEFAULT" "$P6_TEXT")
 else
   BATON_DIR_ANS="BATON_DIR=${BATON_DIR:-$P1_DEFAULT}"
   BATON_PROGRESS_DIR_ANS="BATON_PROGRESS_DIR=${BATON_PROGRESS_DIR:-$P2_DEFAULT}"
   BATON_ARCHIVE_DIR_ANS="BATON_ARCHIVE_DIR=${BATON_ARCHIVE_DIR:-$P3_DEFAULT}"
   BATON_PROJECT_DIR_ANS="BATON_PROJECT_DIR=${BATON_PROJECT_DIR:-$P4_DEFAULT}"
   BATON_DISPLAY_NAME_ANS="BATON_DISPLAY_NAME=${BATON_DISPLAY_NAME:-$P5_DEFAULT}"
+  BATON_ENABLE_AUTOCONTINUE_ANS="BATON_ENABLE_AUTOCONTINUE=${BATON_ENABLE_AUTOCONTINUE:-$P6_DEFAULT}"
 fi
 
 # Export so install-cron picks them up.
@@ -146,6 +152,7 @@ _apply_ans "$BATON_PROGRESS_DIR_ANS"
 _apply_ans "$BATON_ARCHIVE_DIR_ANS"
 _apply_ans "$BATON_PROJECT_DIR_ANS"
 _apply_ans "$BATON_DISPLAY_NAME_ANS"
+_apply_ans "$BATON_ENABLE_AUTOCONTINUE_ANS"
 
 # 4. Statusline shim.
 SHIM_SRC="$REPO_DIR/assets/baton-pct.sh"
@@ -187,6 +194,41 @@ if ! grep -qE '^\.baton/?$' "$GITIGNORE"; then
   fi
   echo ".baton/" >> "$GITIGNORE"
 fi
+
+# 6b. Opt-in: auto-continue (relaunch) + `baton` launch alias (P6, default no).
+# Interactive: gated on the P6 answer. Non-interactive: clean no-op unless
+# BATON_ENABLE_AUTOCONTINUE opts in. Idempotent: _cfg::set and alias_write replace in place.
+case "$(printf '%s' "${BATON_ENABLE_AUTOCONTINUE:-no}" | tr '[:upper:]' '[:lower:]')" in
+  y|yes|true|1)
+    # shellcheck source=../lib/config.sh
+    source "$REPO_DIR/lib/config.sh"
+    # shellcheck source=../lib/shell-alias.sh
+    source "$REPO_DIR/lib/shell-alias.sh"
+    # Driver-agnostic alias: baton-run.sh honors whichever auto_continue_mode is set.
+    # Seed relaunch as the default ONLY when nothing is configured yet, so a user who
+    # preselected tmux keeps it.
+    _cur_mode="$(_cfg::get BATON_AUTO_CONTINUE_MODE '' auto_continue_mode 2>/dev/null || echo '')"
+    # Legacy opt-in BATON_AUTO_CONTINUE=1 resolves to effective tmux (lib/config.sh:71).
+    # Honor it so an already-tmux user with no explicit auto_continue_mode key is not
+    # silently reseeded to relaunch. (_cfg::get returns '' for unset; do NOT swap in
+    # _cfg::auto_continue_mode here - it returns 'off' as its default and would make the
+    # -z test never fire, so relaunch would never be seeded.)
+    if [ -z "$_cur_mode" ] && [ "${BATON_AUTO_CONTINUE:-0}" = "1" ]; then _cur_mode=tmux; fi
+    if [ -z "$_cur_mode" ]; then
+      _cfg::set auto_continue_mode relaunch
+      echo "baton: auto_continue_mode=relaunch (default) persisted - switch with '/baton set auto_continue_mode=tmux'" >&2
+    else
+      echo "baton: keeping existing auto_continue_mode=$_cur_mode; the baton alias will use it" >&2
+    fi
+    _cfg::set launch_alias baton
+    _alias_target="bash ${INSTALL_PREFIX:-$REPO_DIR}/tools/baton-run.sh"
+    while IFS= read -r _rc; do
+      alias_write baton "$_alias_target" "$_rc"
+      echo "baton: installed launch alias 'baton' in $_rc" >&2
+    done < <(alias_rc_files)
+    unset _alias_target _rc _cur_mode
+    ;;
+esac
 
 # E7-T4: logrotate install
 # Copy share/logrotate.d/baton to /etc/logrotate.d/ on Linux when

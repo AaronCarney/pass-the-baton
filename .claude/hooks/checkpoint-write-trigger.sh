@@ -333,7 +333,7 @@ if [ "$(_cfg::auto_continue_mode)" = "tmux" ] && [ -n "${TMUX:-}" ]; then
   _AC_PANE=""
   [ -f "$TERM_FILE" ] && _AC_PANE=$(jq -r '.tmux_pane // empty' "$TERM_FILE" 2>/dev/null)
   if [ -n "$_AC_PANE" ]; then
-    _AC_BIN="${BATON_AUTO_CONTINUE_BIN:-$SCRIPT_DIR/../../tools/baton-auto-continue.sh}"
+    _AC_BIN="$(_cfg::get BATON_AUTO_CONTINUE_BIN "$SCRIPT_DIR/../../tools/baton-auto-continue.sh")"
     if [ -x "$_AC_BIN" ] || [ -f "$_AC_BIN" ]; then
       # Mirror the setsid/nohup guard at session-start.sh:459 so the injector
       # still detaches on hosts without setsid (e.g. macOS default).

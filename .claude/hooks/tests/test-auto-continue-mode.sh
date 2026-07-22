@@ -158,6 +158,34 @@ assert "trigger-spawns-on-legacy-back-compat" "grep -qE '%[0-9]+' '$SPAWN_LEGACY
 sleep 1
 assert "trigger-no-spawn-when-mode-relaunch" "[ ! -s '$SPAWN_RELAUNCH' ]"
 
+# --- config-only BATON_AUTO_CONTINUE_BIN (no env): exercise the _cfg::get migration ---
+# An env-set BIN wins with or without the migration; only a config.json-set BIN that is
+# actually spawned proves checkpoint-write-trigger.sh resolves _AC_BIN through _cfg::get.
+_cfg_clear
+cat > "$TMP/inj-cfg.sh" <<'INJ'
+#!/bin/bash
+echo "$@" >> "$SPAWN_LOG"
+INJ
+chmod +x "$TMP/inj-cfg.sh"
+_cfg::set BATON_AUTO_CONTINUE_BIN "$TMP/inj-cfg.sh"
+SPAWN_CFG="$TMP/spawn.cfg"; : > "$SPAWN_CFG"
+CFGDIR=$(mktemp -d); _stage "$CFGDIR" c-cfg '%3'
+CFGIN=$(jq -cn --arg s c-cfg --arg c "$CFGDIR" --arg f "$CFGDIR/.baton/progress/progress-testws-abc.md" '{session_id:$s, cwd:$c, tool_name:"Write", tool_input:{file_path:$f}}')
+(
+  export XDG_STATE_HOME="$CFGDIR/state" BATON_EVENT_LOG="$CFGDIR/hook-events.jsonl"
+  export BATON_DIR="$CFGDIR/.baton" BATON_PROGRESS_DIR="$CFGDIR/.baton/progress"
+  export BATON_ARCHIVE_DIR="$CFGDIR/archive" CLAUDE_PROJECT_DIR="$CFGDIR"
+  export CLAUDE_TERMINAL_ID="test-term-$$" BATON_COLLECT=1
+  unset AGENT_SESSION_ID BATON_EVENT_LOG_DISABLE BATON_AUTO_CONTINUE_BIN BATON_AUTO_CONTINUE_MODE
+  export TMUX='/tmp/fake,1,0' SPAWN_LOG="$SPAWN_CFG" BATON_AUTO_CONTINUE=1
+  mkdir -p "$CFGDIR/share/templates" && : > "$CFGDIR/share/templates/free.md"
+  printf '%s' "$CFGIN" | "$HOOKS_DIR/checkpoint-write-trigger.sh" >/dev/null 2>&1
+)
+rm -f "/tmp/baton-pending-c-cfg" "/tmp/baton-done-c-cfg" "/tmp/claude-session-tracking-c-cfg"
+for _i in $(seq 1 50); do [ -s "$SPAWN_CFG" ] && break; sleep 0.1; done
+assert "config-only-BIN-spawns-config-set-injector" "grep -qE '%[0-9]+' '$SPAWN_CFG'"
+_cfg_clear
+
 echo "$PASS passed, $FAIL failed"
 [ "${#FAILED_CASES[@]}" -eq 0 ] || printf 'failed: %s\n' "${FAILED_CASES[*]}" >&2
 [ "$FAIL" -eq 0 ]

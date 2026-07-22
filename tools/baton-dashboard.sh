@@ -39,10 +39,10 @@ _show() {
   printf '  %-32s %-40s %s\n' 'templates_dir:'         "$(jq -r '.templates_dir // empty' "$CFG" 2>/dev/null)" '[config-only]'
   printf '  %-32s %-40s %s\n' 'project_context_file:'  "$(jq -r '.project_context_file // empty' "$CFG" 2>/dev/null)" '[config-only]'
   printf '\n[Paths]\n'
-  printf '  %-32s %-40s %s\n' 'BATON_DIR:'           "$(_cfg::get BATON_DIR "$PWD/.baton")" '[env-only by design]'
+  printf '  %-32s %-40s %s\n' 'BATON_DIR:'           "${BATON_DIR:-$PWD/.baton}" '[env-only by design]'
   printf '  %-32s %-40s %s\n' 'BATON_PROGRESS_DIR:'  "$(_cfg::get BATON_PROGRESS_DIR "$PWD/.baton/progress")" "$(_src BATON_PROGRESS_DIR)"
   printf '  %-32s %-40s %s\n' 'BATON_ARCHIVE_DIR:'   "$(_cfg::get BATON_ARCHIVE_DIR "$HOME/.local/share/baton")" "$(_src BATON_ARCHIVE_DIR)"
-  printf '  %-32s %-40s %s\n' 'BATON_PROJECT_DIR:'   "$(_cfg::get BATON_PROJECT_DIR "$PWD")" '[env-only by design]'
+  printf '  %-32s %-40s %s\n' 'BATON_PROJECT_DIR:'   "${BATON_PROJECT_DIR:-$PWD}" '[env-only by design]'
   printf '\n[TTLs]\n'
   printf '  %-32s %-40s %s\n' 'BATON_WORKSTREAM_TTL_DAYS:' "$(( $(workstream_ttl_seconds) / 86400 ))" "$(_src BATON_WORKSTREAM_TTL_DAYS)"
   printf '  %-32s %-40s %s\n' 'BATON_TRACKING_TTL_DAYS:'   "$(( $(tracking_ttl_seconds) / 86400 ))" "$(_src BATON_TRACKING_TTL_DAYS)"
@@ -58,6 +58,10 @@ _show() {
   # checkpoint-write-trigger.sh arms the tmux injector - the exact disagreement
   # lib/config.sh:6-10 forbids.
   printf '  %-32s %-40s %s\n' 'auto_continue_mode:' "$(_cfg::auto_continue_mode)" "$(_src BATON_AUTO_CONTINUE_MODE auto_continue_mode)"
+  printf '  %-32s %-40s %s\n' 'launch_alias:'       "$(jq -r '.launch_alias // empty' "$CFG" 2>/dev/null)" '[config-only]'
+  printf '  %-32s %-40s %s\n' 'BATON_AUTO_CONTINUE_NUDGE:' "$(_cfg::get BATON_AUTO_CONTINUE_NUDGE "$BATON_DEFAULT_AUTO_CONTINUE_NUDGE")" "$(_src BATON_AUTO_CONTINUE_NUDGE)"
+  printf '  %-32s %-40s %s\n' 'BATON_AUTO_CONTINUE_LOG:'   "$(_cfg::get BATON_AUTO_CONTINUE_LOG "${TMPDIR:-/tmp}/baton-auto-continue.log")" "$(_src BATON_AUTO_CONTINUE_LOG)"
+  printf '  %-32s %-40s %s\n' 'BATON_AUTO_CONTINUE_BIN:'   "$(_cfg::get BATON_AUTO_CONTINUE_BIN "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/baton-auto-continue.sh")" "$(_src BATON_AUTO_CONTINUE_BIN)"
   printf '\n[Event-log]\n'
   printf '  %-32s %-40s %s\n' 'BATON_EVENT_LOG:'      "$(_cfg::get BATON_EVENT_LOG "${XDG_STATE_HOME:-$HOME/.local/state}/baton/hook-events.jsonl")" "$(_src BATON_EVENT_LOG)"
   printf '  %-32s %-40s %s\n' 'BATON_OTEL_EXPORT:'    "$(_cfg::get BATON_OTEL_EXPORT '')" "$(_src BATON_OTEL_EXPORT)"
@@ -200,19 +204,49 @@ _set_one() {
     BATON_STATUSLINE_COLOR_MODE)
       case "$value" in off|solid|bands) ;; *) echo "Error: $key color mode must be one of: off, solid, bands" >&2; return 1;; esac
       ;;
+    BATON_AUTO_CONTINUE_NUDGE|BATON_AUTO_CONTINUE_LOG|BATON_AUTO_CONTINUE_BIN)
+      [ -n "$value" ] || { echo "Error: $key cannot be empty" >&2; return 1; }
+      ;;
     auto_continue_mode)
       case "$value" in off|tmux|relaunch) ;; *) echo "Error: $key must be one of: off, tmux, relaunch" >&2; return 1;; esac
+      ;;
+    launch_alias)
+      # Validate the name via Task 1's lib, then persist AND rewrite the marker block in
+      # each rc file. Pass the value as its own reclaim sentinel so re-setting the same
+      # name does not trip the PATH-shadow check on an alias this dashboard installed.
+      source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/shell-alias.sh"
+      _prev_alias="$(_cfg::get launch_alias '')"
+      alias_name_valid "$value" "$_prev_alias"; _rc_v=$?
+      if [ "$_rc_v" -ne 0 ]; then
+        case "$_rc_v" in
+          1) echo "Error: launch_alias cannot be empty" >&2 ;;
+          2) echo "Error: launch_alias must match [A-Za-z_][A-Za-z0-9_-]* (no spaces, slashes, or metacharacters)" >&2 ;;
+          3) echo "Error: launch_alias '$value' is a shell builtin - pick another name" >&2 ;;
+          4) echo "Error: launch_alias '$value' is a shell keyword - pick another name" >&2 ;;
+          5) echo "Error: launch_alias '$value' already resolves on PATH (would shadow it) - pick another name" >&2 ;;
+        esac
+        return 1
+      fi
+      _cfg::set launch_alias "$value"
+      _alias_target="bash $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/baton-run.sh"
+      while IFS= read -r _rc; do
+        alias_write "$value" "$_alias_target" "$_rc"
+        echo "baton: launch alias '$value' written to $_rc" >&2
+      done < <(alias_rc_files)
+      unset _alias_target _rc _rc_v _prev_alias
+      return 0
       ;;
     *)
       cat >&2 <<'EOF'
 Error: unknown key. Valid keys:
-  [Existing]   template, threshold_pct, display_name, templates_dir, project_context_file, max_terminals_per_workstream, auto_continue_mode
+  [Existing]   template, threshold_pct, display_name, templates_dir, project_context_file, max_terminals_per_workstream, auto_continue_mode, launch_alias
   [Paths]      BATON_DIR, BATON_PROGRESS_DIR, BATON_ARCHIVE_DIR, BATON_PROJECT_DIR
   [TTLs]       BATON_WORKSTREAM_TTL_DAYS, BATON_TRACKING_TTL_DAYS, BATON_TMP_TTL_HOURS
   [Opt-ins]    BATON_COLLECT, BATON_TIMING, BATON_OUTCOME_PROXIES, BATON_PREWARM, BATON_EVENT_LOG_DISABLE
   [Event-log]  BATON_EVENT_LOG, BATON_OTEL_EXPORT
   [Cost-model] BATON_COST_MODEL, BATON_SUMMARY_MODEL, BATON_TOKEN_RATIOS
   [Statusline] BATON_STATUSLINE_COLOR_MODE
+  [Auto-cont]  BATON_AUTO_CONTINUE_NUDGE, BATON_AUTO_CONTINUE_LOG, BATON_AUTO_CONTINUE_BIN
 EOF
       return 1
       ;;

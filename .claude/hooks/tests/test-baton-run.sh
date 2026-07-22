@@ -105,6 +105,7 @@ d=$(_case_dir relaunch-once); make_fake "$d/claude"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="once-$$" _CLAUDE_BIN="$d/claude"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   bash "$WRAPPER" >/dev/null 2>&1
 )
 assert "relaunch-once" "[ \"\$(cat $d/count)\" = 2 ]"
@@ -115,6 +116,7 @@ d=$(_case_dir no-marker); make_fake_never "$d/claude"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="nomark-$$" _CLAUDE_BIN="$d/claude"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   bash "$WRAPPER" >/dev/null 2>&1
 )
 assert "no-marker-single-run" "[ \"\$(cat $d/count)\" = 1 ]"
@@ -125,6 +127,7 @@ d=$(_case_dir cap); make_fake_always "$d/claude"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="cap-$$" _CLAUDE_BIN="$d/claude"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   export BATON_RELAUNCH_MAX=3
   bash "$WRAPPER" >/dev/null 2>&1
 )
@@ -137,6 +140,7 @@ d=$(_case_dir bad-cap); make_fake_always "$d/claude"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="badcap-$$" _CLAUDE_BIN="$d/claude"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   export BATON_RELAUNCH_MAX=ten
   timeout 60 bash "$WRAPPER" >/dev/null 2>&1
 )
@@ -154,6 +158,7 @@ PLANTED="$d/baton-relaunch-$(_th "$_tid")"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="$_tid" _CLAUDE_BIN="$d/claude"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   bash "$WRAPPER" >/dev/null 2>&1
 )
 assert "stale-marker-ignored" "[ \"\$(cat $d/count)\" = 1 ]"
@@ -165,6 +170,7 @@ d=$(_case_dir sigterm); make_fake_143 "$d/claude"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="sig-$$" _CLAUDE_BIN="$d/claude"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   bash "$WRAPPER" >/dev/null 2>&1
 )
 assert "143-relaunches" "[ \"\$(cat $d/count)\" = 2 ]"
@@ -177,6 +183,7 @@ _tid="env-$$"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="$_tid" _CLAUDE_BIN="$d/claude"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   export SUP_FILE="$d/sup" WRAPPER_PID_FILE="$d/wpid" REQ_FILE="$d/req"
   export IDS_FILE="$d/ids" ALIVE_FILE="$d/alive"
   bash "$WRAPPER" >/dev/null 2>&1
@@ -196,6 +203,7 @@ d=$(_case_dir args); make_fake_args "$d/claude"
 (
   export COUNT_FILE="$d/count" BATON_RELAUNCH_LOG="$d/log" TMPDIR="$d"
   export CLAUDE_TERMINAL_ID="args-$$" _CLAUDE_BIN="$d/claude" ARGS_FILE="$d/args"
+  export BATON_AUTO_CONTINUE_MODE=relaunch
   bash "$WRAPPER" --foo bar >/dev/null 2>&1
 )
 assert "args-passthrough" "grep -q -- '--foo bar' $d/args"

@@ -19,6 +19,10 @@ BATON_DEFAULT_MAX_TERMINALS=0
 # unrecognized-value fallthrough, so the shown value can never disagree with the gate.
 BATON_DEFAULT_AUTO_CONTINUE_MODE=off
 
+# E6 tmux-driver nudge default. The dashboard _show row reads this so the displayed
+# default matches the injector's built-in `proceed` (tools/baton-auto-continue.sh).
+BATON_DEFAULT_AUTO_CONTINUE_NUDGE=proceed
+
 _cfg::path() {
   printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/baton/config.json"
 }
@@ -136,3 +140,4 @@ export -f _cfg::path 2>/dev/null || true
 export BATON_DEFAULT_PCT_THRESHOLD 2>/dev/null || true
 export BATON_DEFAULT_MAX_TERMINALS 2>/dev/null || true
 export BATON_DEFAULT_AUTO_CONTINUE_MODE 2>/dev/null || true
+export BATON_DEFAULT_AUTO_CONTINUE_NUDGE 2>/dev/null || true

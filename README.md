@@ -51,7 +51,7 @@ The statusline context-fill readout (`CTX:NN%`) is optional and isn't wired by t
 
 > *Please install Pass the Baton into this project.*
 
-Say that to Claude Code and the `install-baton` skill takes over: it finds your target project from `$PWD`, walks the 5 setup prompts, wires the statusline (confirming first), runs `verify-install.sh`, and points you at `/baton` for ongoing tuning. Use this path when you want the statusline and an interactive setup.
+Say that to Claude Code and the `install-baton` skill takes over: it finds your target project from `$PWD`, walks the 6 setup prompts, wires the statusline (confirming first), runs `verify-install.sh`, and points you at `/baton` for ongoing tuning. Use this path when you want the statusline and an interactive setup.
 
 Don't have Claude Code yet? [claude.com/claude-code](https://claude.com/claude-code).
 
@@ -86,7 +86,7 @@ Full setup including the dep table + statusline + manual cron fallback: [`docs/i
 /plugin update pass-the-baton
 ```
 
-Plugins update from the marketplace on demand; toggle auto-update in `/plugin` settings to pull new revisions automatically. Releases are **commit-SHA versioned** - `plugin.json` intentionally omits a semver `version`, so the installed revision tracks the marketplace repo's HEAD commit rather than a tag. As a freshness signal, the SessionStart staleness probe surfaces a `last swept Nh ago` notice when the cleanup sweep (and therefore your last session, where updates are pulled) hasn't run recently.
+Plugins update from the marketplace on demand; toggle auto-update in `/plugin` settings to pull new revisions automatically. Releases are **semver-versioned** - `plugin.json` carries the current `version` and each release is recorded in [`CHANGELOG.md`](CHANGELOG.md). As a freshness signal, the SessionStart staleness probe surfaces a `last swept Nh ago` notice when the cleanup sweep (and therefore your last session, where updates are pulled) hasn't run recently.
 
 ---
 
@@ -111,6 +111,12 @@ Other env vars you might set:
 | `BATON_AUTO_CONTINUE` | unset | `=1` still means tmux: auto-drives `/clear` + a continue nudge into your pane after a checkpoint; clean no-op otherwise. `BATON_AUTO_CONTINUE_MODE` (`off`\|`tmux`\|`relaunch`) now picks the driver. See [`docs/configuration.md` § Auto-continue](docs/configuration.md) |
 
 Full env-var table (paths, TTLs, archive dirs): [`docs/context-baton.md` § Configuration](docs/context-baton.md#configuration-env-vars).
+
+### Auto-continue + the `baton` launcher
+
+After a checkpoint saves, Pass the Baton can continue the session for you instead of leaving you to `/clear` and re-prompt by hand. The driver is the `auto_continue_mode` config key (`off` by default; `tmux` drives `/clear` + a continue nudge into your pane, `relaunch` runs a fresh-session supervisor loop). Opt into a `baton` launch alias at install time (the 6th prompt) - then you launch with `baton` instead of `claude`, and it honors whichever driver you've set. Switch drivers any time with `/baton set auto_continue_mode=tmux`. Details: [`docs/configuration.md` § Auto-continue](docs/configuration.md).
+
+Need to hand off early, before the threshold trips? Run **`/pass-the-baton:renew`** - it fires a checkpoint immediately, running the identical save-and-handoff path as an automatic threshold crossing, independent of the reported context %.
 
 ### `/baton` skill + progress-file templates
 
@@ -227,7 +233,7 @@ Prompt and completion text are never captured by either writer; tool arguments a
 
 ## Tests
 
-118 shell test suites, grouped by concern:
+141 shell test suites, grouped by concern:
 
 - **Core flow:** `test-workstream-hooks.sh`, `test-restore-workstream.sh`, `test-prompt-sync.sh`
 - **Install / verify:** `test-install-tools.sh`, `test-installer-nfs-warn.sh`, `test-installer-post-tool-batch.sh`, `test-installer-tool-timing.sh`, `test-doctor.sh`

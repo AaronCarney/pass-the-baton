@@ -16,8 +16,20 @@ command -v tmux >/dev/null 2>&1 || exit 0
 
 : "${_AUTO_CONTINUE_POLL_INTERVAL:=0.3}"   # seconds between pane-readiness polls
 : "${_AUTO_CONTINUE_POLL_MAX_SECONDS:=60}" # bounded max-wait, then give up cleanly
-: "${BATON_AUTO_CONTINUE_NUDGE:=proceed}"  # text sent after /clear to start the model
-: "${BATON_AUTO_CONTINUE_LOG:=${TMPDIR:-/tmp}/baton-auto-continue.log}"  # audit trail
+# Resolve the two tmux-driver knobs through the shared config helper so a `/baton set
+# BATON_AUTO_CONTINUE_NUDGE=...` is honored by this detached injector, not just persisted
+# (env > config.json > default). Guard-source the resolver like the hooks do; if it is
+# unreachable the := fallbacks preserve the shipped defaults.
+if ! declare -F _cfg::get >/dev/null 2>&1; then
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/config.sh" 2>/dev/null || true
+fi
+if declare -F _cfg::get >/dev/null 2>&1; then
+  BATON_AUTO_CONTINUE_NUDGE="$(_cfg::get BATON_AUTO_CONTINUE_NUDGE proceed)"                              # text sent after /clear to start the model
+  BATON_AUTO_CONTINUE_LOG="$(_cfg::get BATON_AUTO_CONTINUE_LOG "${TMPDIR:-/tmp}/baton-auto-continue.log")"  # audit trail
+else
+  : "${BATON_AUTO_CONTINUE_NUDGE:=proceed}"
+  : "${BATON_AUTO_CONTINUE_LOG:=${TMPDIR:-/tmp}/baton-auto-continue.log}"
+fi
 
 # Observability (owner rule: no failure path ends silently). Once the fire-once
 # marker (`.fired`) is claimed the injector is COMMITTED, so every terminal state

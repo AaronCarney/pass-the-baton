@@ -39,7 +39,7 @@ Cited: `lib/config.sh:10-40`.
 ### `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`
 
 - The Claude Code plugin manifest.
-- Intentionally carries **no** semver `version` - it is SHA-versioned. The installed revision tracks marketplace HEAD.
+- Carries a semver `version`; the release history is recorded in [`CHANGELOG.md`](../CHANGELOG.md). The installed revision tracks the marketplace repo.
 
 ### `hooks/hooks.json`
 
@@ -93,9 +93,19 @@ Launch `bash tools/baton-run.sh` **instead of** `claude` - any arguments pass st
 - `BATON_RELAUNCH_MAX` (default `10`): cap on relaunches per `baton-run` invocation. On reaching it the supervisor stops and says so; run `baton-run` again to keep going. A non-numeric value falls back to `10` rather than uncapping.
 - `BATON_RELAUNCH_LOG` (default `${TMPDIR:-/tmp}/baton-relaunch.log`): once a relaunch is armed it is committed, so every terminal state past that point writes one line here (`armed`, `relaunch-requested`, `degraded-sigkill`, and the `noop-*` / `fail-*` tags). Check it if a relaunch did not behave as expected.
 
+**`baton` launch alias.** So you can type `baton` instead of `bash tools/baton-run.sh`, the installer's 6th prompt (opt-in, default no) and the `/baton set launch_alias=<name>` dashboard key write a marker-guarded `alias <name>='bash <pass-the-baton-repo>/tools/baton-run.sh'` block to your shell rc (`~/.bashrc` and/or `~/.zshrc`). The alias launches Claude with your configured auto-continue driver (`off`, `tmux`, or `relaunch`), selected via `/baton set auto_continue_mode=...`; the installer seeds `relaunch` as the default only when no driver is already set. The block is rewritten in place on change and never duplicated. `launch_alias` rejects an empty name, a name with spaces/slashes/metacharacters, a shell builtin/keyword, or a name that already resolves on PATH (unless you are reclaiming that exact name).
+
 **Abort:** delete `/tmp/baton-done-<session_id>` before the turn ends and nothing is ever armed. Setting or unsetting an env var in the terminal does **not** abort an armed relaunch - the helper is a detached process with a frozen environment. Deleting the done-flag does not stop one either: the helper never reads it.
 
 **First use:** the relaunch is a real process termination, not a `/clear`. Before relying on it, run it once in your real terminal and confirm the session ends only after a turn completes and the fresh session comes back with your progress injected. The driver is off by default and abortable (delete the done-flag), and every committed action is logged, so a mis-fire is diagnosable.
+
+## Manual checkpoint (/pass-the-baton:renew)
+
+Run `/pass-the-baton:renew` to fire a checkpoint immediately, before the context-fill threshold is reached. It arms a one-shot per-session flag that the checkpoint hook consumes on your next action, running the identical save-and-handoff path as an automatic threshold crossing. It is context-% independent, so it works even if your statusline is not emitting a percentage.
+
+It composes with whichever driver is active (tmux or relaunch): after the save, the same driver continues the session.
+
+Manual smoke: after invoking `/pass-the-baton:renew`, the flag file `/tmp/baton-force-checkpoint-$CLAUDE_CODE_SESSION_ID` exists until your next action consumes it.
 
 ## See also
 

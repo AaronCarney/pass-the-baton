@@ -106,6 +106,9 @@ tools/baton-dashboard.sh set key=value [key2=value2 ...]
 | `display_name` | string | Friendly workstream display name. |
 | `templates_dir` | path | Override for the custom-templates directory. |
 | `project_context_file` | path | Per-project context JSON; default `.baton-project/project-context.json`. |
+| `max_terminals_per_workstream` | integer >= 0 | Cap on terminals bound to one workstream. |
+| `auto_continue_mode` | enum: `off` / `tmux` / `relaunch` | Auto-continue driver the `baton` launcher (`tools/baton-run.sh`) dispatches on. Default `off`; legacy `BATON_AUTO_CONTINUE=1` resolves to effective `tmux`. |
+| `launch_alias` | alias name | Installs/rewrites a marker-guarded `alias <name>='bash <repo>/tools/baton-run.sh'` rc block. Rejects empty names, metacharacters, shell builtins/keywords, and names already on PATH. |
 
 ### Safety
 

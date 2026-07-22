@@ -41,6 +41,9 @@ env-var > config.json > default precedence (`lib/config.sh`).
 | `display_name` | Free-form string | `display_name=myproject` |
 | `templates_dir` | Free-form path | `templates_dir=/path/to/templates` |
 | `project_context_file` | Path relative to project root | `project_context_file=.baton-project/project-context.json` |
+| `max_terminals_per_workstream` | Non-negative integer | `max_terminals_per_workstream=4` |
+| `auto_continue_mode` | One of: `off`, `tmux`, `relaunch` (selects the `baton` launcher's auto-continue driver) | `auto_continue_mode=relaunch` |
+| `launch_alias` | Alias name matching `[A-Za-z_][A-Za-z0-9_-]*`, not a shell builtin/keyword or a name already on PATH; writes/rewrites the `alias <name>='bash <repo>/tools/baton-run.sh'` rc block | `launch_alias=baton` |
 
 **[Paths]** - non-empty string
 
