@@ -99,6 +99,17 @@ exit 0
 EOF
 chmod +x "$1"; }
 
+# Appends this launch's argv, one line per launch, so run 1 and run 2 can be graded
+# apart. Marker on the FIRST run only, so the loop runs exactly twice.
+make_fake_argv_log() { cat > "$1" <<'EOF'
+#!/bin/bash
+n=$(cat "$COUNT_FILE" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$COUNT_FILE"
+echo "$*" >> "$ARGV_LOG"
+[ "$n" -eq 1 ] && : > "$BATON_RELAUNCH_REQ"
+exit 0
+EOF
+chmod +x "$1"; }
+
 # ---------------------------------------------------------------------------
 # 1. relaunches exactly once, then stops (marker absent on run 2)
 d=$(_case_dir relaunch-once); make_fake "$d/claude"
@@ -207,6 +218,51 @@ d=$(_case_dir args); make_fake_args "$d/claude"
   bash "$WRAPPER" --foo bar >/dev/null 2>&1
 )
 assert "args-passthrough" "grep -q -- '--foo bar' $d/args"
+
+# 8. session-selection flags are FIRST-LAUNCH ONLY.
+# The supervisor replays argv on every iteration. `--resume` with no id opens the
+# interactive picker, so a relaunch that replays it blocks on a UI instead of
+# continuing (owner-reported against the live install); `--resume <id>` / `--continue`
+# would re-enter the very session the checkpoint just handed off from. Each case
+# grades run 1 and run 2 SEPARATELY - one appended line per launch - because a fake
+# that overwrites would hide exactly the difference under test.
+_argv_case() {
+  local name="$1"; shift
+  local dd; dd=$(_case_dir "$name"); make_fake_argv_log "$dd/claude"
+  (
+    export COUNT_FILE="$dd/count" BATON_RELAUNCH_LOG="$dd/log" TMPDIR="$dd"
+    export CLAUDE_TERMINAL_ID="$name-$$" _CLAUDE_BIN="$dd/claude" ARGV_LOG="$dd/argv"
+    export BATON_AUTO_CONTINUE_MODE=relaunch
+    bash "$WRAPPER" "$@" >/dev/null 2>&1
+  )
+  echo "$dd"
+}
+
+d=$(_argv_case resume-bare --resume)
+assert "resume-bare-run1-keeps"  "[ \"\$(sed -n 1p $d/argv)\" = '--resume' ]"
+assert "resume-bare-run2-strips" "[ -z \"\$(sed -n 2p $d/argv)\" ]"
+
+d=$(_argv_case resume-id --resume abc123 --model opus)
+assert "resume-id-run1-keeps"  "[ \"\$(sed -n 1p $d/argv)\" = '--resume abc123 --model opus' ]"
+assert "resume-id-run2-strips" "[ \"\$(sed -n 2p $d/argv)\" = '--model opus' ]"
+
+d=$(_argv_case continue-short -c --model opus)
+assert "continue-short-run1-keeps"  "[ \"\$(sed -n 1p $d/argv)\" = '-c --model opus' ]"
+assert "continue-short-run2-strips" "[ \"\$(sed -n 2p $d/argv)\" = '--model opus' ]"
+
+d=$(_argv_case resume-short -r)
+assert "resume-short-run2-strips" "[ -z \"\$(sed -n 2p $d/argv)\" ]"
+
+d=$(_argv_case continue-long --continue)
+assert "continue-long-run2-strips" "[ -z \"\$(sed -n 2p $d/argv)\" ]"
+
+# A flag AFTER bare --resume is not a session id and must survive.
+d=$(_argv_case resume-then-flag --resume --model opus)
+assert "resume-then-flag-run2-keeps-model" "[ \"\$(sed -n 2p $d/argv)\" = '--model opus' ]"
+
+# Nothing to strip -> argv is identical on both launches.
+d=$(_argv_case no-session-flags --model opus)
+assert "no-session-flags-unchanged" "[ \"\$(sed -n 1p $d/argv)\" = \"\$(sed -n 2p $d/argv)\" ] && [ \"\$(sed -n 2p $d/argv)\" = '--model opus' ]"
 
 rm -rf "$TMP"
 echo "$PASS passed, $FAIL failed"

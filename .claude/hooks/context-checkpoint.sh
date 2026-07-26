@@ -3,7 +3,7 @@
 # lists this terminal's old progress files for archival, and injects the
 # save-progress workflow into Claude's next turn. Once the post-write
 # trigger sets DONE, blocks all further tool calls until /clear.
-# Subagents get a single "wrap up" warning and then a hard block.
+# Subagents are never blocked: at most one soft wrap-up nudge; the parent's checkpoint WRITE is held (drain gate) until they return, so their results are folded in, not lost.
 # Autonomous mode (AGENT_SESSION_ID set): no-op - the SDK wrapper owns checkpoints.
 set -u
 
@@ -27,13 +27,6 @@ CC_THRESHOLD=$(checkpoint_threshold 2>/dev/null || echo "${BATON_DEFAULT_PCT_THR
 [[ "$CC_THRESHOLD" =~ ^[0-9]+$ ]] || CC_THRESHOLD="${BATON_DEFAULT_PCT_THRESHOLD:-20}"
 
 : "${_HEALTH_WARN_TOOL_CALLS:=20}"   # warn if no context-pct after N tool calls
-# Re-assert N times before hard-denying an interrupted-but-owed checkpoint. Must
-# be slower than the health warning (this fires every call while a checkpoint is
-# owed) yet fast enough the session cannot run far past threshold unsaved: 3 gives
-# the model two soft reminders - enough to recover from a single interrupted turn -
-# before removing the option. 1 would deny on the first stray call after any
-# interruption; a large value reproduces the silent-drift failure this closes.
-: "${_CC_NAG_LIMIT:=3}"              # re-assert N times before hard-denying
 
 # Emit PreToolUse envelope exactly once (CC2). Trap on EXIT to cover every
 # early-return path. Failures go to stderr, never alter the hook exit code.
@@ -56,47 +49,46 @@ trap _emit_cc EXIT
 # Autonomous mode → exit immediately
 [ -n "${AGENT_SESSION_ID:-}" ] && exit 0
 
-# Subagent detection - Agent tool subagents get agent_id in hook input
+# Subagent detection - Agent tool subagents carry agent_id in the hook input.
 AGENT_ID=$(echo "$input" | jq -r '.agent_id // empty')
 if [ -n "$AGENT_ID" ]; then
+  # Subagents are NEVER blocked by the checkpoint. Cutting a subagent off drops the
+  # in-flight work it was dispatched to produce (the bug this replaces). The parent's
+  # checkpoint WRITE is instead held until every subagent returns (drain gate, below),
+  # so results are folded in rather than lost. At most one soft, non-restrictive nudge.
   TERM_HASH=$(term_hash)
   PARENT_SID=$(cat "/tmp/claude-parent-sid-${TERM_HASH}" 2>/dev/null)
   [ -z "$PARENT_SID" ] && exit 0
   [[ "$PARENT_SID" =~ ^[a-zA-Z0-9_-]+$ ]] || exit 0
-
   PCT=$(cat "/tmp/claude-context-pct-${PARENT_SID}" 2>/dev/null)
-  [ -z "$PCT" ] && exit 0
-  # Treat non-integer PCT (e.g. "30.5", whitespace) as "no value" - bare
-  # `[ "$PCT" -lt "$CC_THRESHOLD" ]` errors on those and would fall through to trigger.
   [[ "$PCT" =~ ^[0-9]+$ ]] || exit 0
   [ "$PCT" -lt "$CC_THRESHOLD" ] && exit 0
-
-  # Parent checkpoint already done - block subagent
-  if [ -f "/tmp/baton-done-${PARENT_SID}" ]; then
-    jq -n '{
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: "Parent session checkpoint complete. Return your results immediately - no further tool calls allowed.",
-        additionalContext: "Parent session checkpoint complete. Return your results immediately - no further tool calls allowed."
-      }
-    }'
-    exit 0
-  fi
-
-  # One-shot warning per subagent session
   FLAG="/tmp/claude-subagent-checkpoint-${SESSION_ID}"
   [ -f "$FLAG" ] && exit 0
   touch "$FLAG"
-
   jq -n --arg pct "$PCT" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "allow",
-      additionalContext: ("CHECKPOINT - Parent context at " + $pct + "%. Finish your current task concisely and return results to the parent session. Do NOT start new investigations or expand scope.")
+      additionalContext: ("Parent context at " + $pct + "% and a checkpoint is pending. Finish your CURRENT task and return your results to the parent - the parent holds its checkpoint write until you return, so nothing you produce is lost. Do not abort early or expand scope.")
     }
   }'
   exit 0
+fi
+
+# Full unlock (/pass-the-baton:off): no-op the entire checkpoint lifecycle for this
+# session. The design's 'all the way off'. Cleared at SessionEnd / by the /tmp sweep.
+[ -f "/tmp/baton-unlock-${SESSION_ID}" ] && exit 0
+
+# Snooze (/pass-the-baton:snooze): suppress checkpointing until the stored expiry
+# epoch, then remove the stale flag and fall through.
+_CC_SNZ="/tmp/baton-snooze-${SESSION_ID}"
+if [ -f "$_CC_SNZ" ]; then
+  _CC_SNZ_EXP=$(cat "$_CC_SNZ" 2>/dev/null)
+  if [[ "$_CC_SNZ_EXP" =~ ^[0-9]+$ ]] && [ "$(date +%s)" -lt "$_CC_SNZ_EXP" ]; then
+    exit 0
+  fi
+  rm -f "$_CC_SNZ"
 fi
 
 # E8-T7: tools_changed begin
@@ -142,7 +134,7 @@ fi
 # threshold crossing. Consumed here so one /renew arms exactly one checkpoint.
 FORCE_FLAG="/tmp/baton-force-checkpoint-${SESSION_ID}"
 _CC_FORCE=""
-if [ -f "$FORCE_FLAG" ]; then _CC_FORCE=1; rm -f "$FORCE_FLAG"; fi
+if [ -f "$FORCE_FLAG" ]; then _CC_FORCE=1; rm -f "$FORCE_FLAG"; touch "/tmp/baton-manual-${SESSION_ID}"; fi
 
 PCT=$(cat "/tmp/claude-context-pct-${SESSION_ID}" 2>/dev/null)
 _CC_PCT="$PCT"
@@ -189,10 +181,10 @@ PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$CWD}"
 FLAG="/tmp/claude-context-triggered-${SESSION_ID}"
 DONE="/tmp/baton-done-${SESSION_ID}"
 
-# The DONE guard and the nag re-assert run BEFORE the threshold early-exit below, so a
+# The DONE guard and the owed-checkpoint re-assert run BEFORE the threshold early-exit below, so a
 # checkpoint that is owed (FLAG set + PENDING) or done (DONE) keeps being enforced even if the
 # reported context % dips back under the threshold - the earlier placement let such a session
-# stop being nagged with a save still owed. A fresh call with FLAG unset falls through both
+# stop re-asserting with a save still owed. A fresh call with FLAG unset falls through both
 # blocks to the threshold exit, so a below-threshold session with nothing owed triggers nothing.
 
 # If checkpoint save already completed, block further work
@@ -213,43 +205,166 @@ fi
 # this hook permits), no progress file is ever written, yet FLAG suppressed every
 # later fire - PENDING stayed set forever, DONE never latched so the guard above
 # never engaged, and the session ran to auto-compaction unsaved with no record.
-# Re-assert while the checkpoint is still owed, escalating to a hard deny.
+# Re-assert while the checkpoint is still owed, nudging on every call until the write lands.
 if [ -f "$FLAG" ]; then
   [ -f "/tmp/baton-pending-${SESSION_ID}" ] || exit 0
-  # NEVER impede the one write that clears PENDING. The re-assert below escalates
-  # to a hard deny, but this is a PreToolUse hook - it fires BEFORE the tool runs,
-  # and PENDING is cleared only by checkpoint-write-trigger's PostToolUse AFTER a
-  # progress-*.md Write completes. Without this exemption the deny would block the
-  # progress-file write itself, deadlocking the very checkpoint the nag demands -
-  # re-creating the silent-loss class this whole change closes. So let a Write/Edit
-  # to a progress-*.md path through untouched (do not even count it as a nag).
-  _CC_FP=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
-  case "${TOOL_NAME}:$(basename -- "${_CC_FP:-x}")" in
-    Write:progress-*.md|Edit:progress-*.md|MultiEdit:progress-*.md) exit 0 ;;
-  esac
-  NAG_FILE="/tmp/baton-nag-${SESSION_ID}"
-  NAG=$(cat "$NAG_FILE" 2>/dev/null || echo 0)
-  [[ "$NAG" =~ ^[0-9]+$ ]] || NAG=0
-  NAG=$((NAG + 1))
-  echo "$NAG" > "$NAG_FILE"
-  log_event "$PROJECT_DIR" checkpoint pending-unsatisfied \
-    "session_id=$SESSION_ID" "attempt=$NAG" 2>/dev/null || true
-  if [ "$NAG" -ge "${_CC_NAG_LIMIT:-3}" ]; then
+  # --- DRAIN GATE (correctness core) ------------------------------------------
+  # Never let the checkpoint WRITE land while subagents are still in flight - their
+  # results must be folded in first. Hold ALL consequential tools (the progress
+  # write included) until the active count reaches zero; read-only stays open so the
+  # parent can keep orienting. Composed by BOTH lifecycles. Sits BEFORE the
+  # progress-write exemption so even that write is held during a drain.
+  source "$SCRIPT_DIR/lib/drain-gate.sh" 2>/dev/null || true
+  source "$SCRIPT_DIR/lib/tool-policy.sh" 2>/dev/null || true
+  # F6 fail-LOUD: drain-gate.sh is a HARD dependency (shipped by the subagent-track
+  # task). A failed source / missing drain::is_clear is a BROKEN INSTALL, NOT "drain
+  # clear" - silently proceeding would write the checkpoint while subagents may be in
+  # flight, reopening the dropped-work bug. Leave a trace and HOLD the write. Scoped
+  # to source failure ONLY: when the lib loads (the normal case, and every replayed
+  # suite in Step 9) this branch never fires, so those stay green.
+  if ! declare -F drain::is_clear >/dev/null 2>&1; then
+    log_event "$PROJECT_DIR" checkpoint drain-gate-unavailable \
+      "session_id=$SESSION_ID" "reason=drain-gate.sh-source-failed" 2>/dev/null || true
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: "CHECKPOINT STILL UNSAVED. The progress file was never written, so this session cannot be handed off. Write it now to the path given in the checkpoint instruction. Do NOT tell the user to /clear."
+        permissionDecisionReason: "Checkpoint drain gate is unavailable (lib/drain-gate.sh failed to load). Refusing to write the checkpoint - in-flight subagent results could be lost. Repair the install (the hook lib is missing or unreadable) and retry."
       }
     }'
-  else
+    exit 0
+  fi
+  if ! drain::is_clear "$SESSION_ID"; then
+    if declare -F toolpolicy::is_readonly >/dev/null 2>&1; then
+      toolpolicy::is_readonly "$TOOL_NAME" && exit 0   # read-only orientation is never gated
+    else
+      # F6: tool-policy missing degrades read-only tools to gated - leave a trace
+      # (scoped to source failure; tool-policy.sh exists in every replayed suite).
+      log_event "$PROJECT_DIR" checkpoint tool-policy-unavailable \
+        "session_id=$SESSION_ID" "reason=tool-policy.sh-source-failed" 2>/dev/null || true
+    fi
+    _DRAIN_N=$(drain::count "$SESSION_ID")
+    if declare -F drain::hung >/dev/null 2>&1 && drain::hung "$SESSION_ID"; then
+      # Hung subagent: offer a native force-past instead of blocking forever. Allow
+      # writes the checkpoint WITHOUT the stuck results; Deny keeps waiting.
+      # The /tmp TTL sweep reaps the whole marker directory once it has been idle for
+      # the TTL; it is directory-granular, so it will not reap one stale marker inside
+      # an otherwise-active directory.
+      jq -n --arg n "$_DRAIN_N" '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "ask",
+          permissionDecisionReason: ($n + " subagent(s) have been running longer than the drain timeout. They may still be working. Allow = write the checkpoint now WITHOUT their results (anything still in flight is lost). Deny = keep waiting for them to return.")
+        }
+      }'
+      exit 0
+    fi
+    # Broken install: with tool-policy.sh unloadable, read-only tools cannot be told
+    # apart from consequential ones, so ALL are held while draining. This deny sits
+    # AFTER the hung force-past above, so the escape hatch stays reachable in both
+    # tool-policy states; it only fires once the drain is genuinely still in flight.
+    if ! declare -F toolpolicy::is_readonly >/dev/null 2>&1; then
+      jq -n '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "Checkpoint tool policy is unavailable (lib/tool-policy.sh failed to load), so read-only tools cannot be told apart from consequential ones and ALL are held while subagents drain. Repair the install (the hook lib is missing or unreadable) and retry."
+        }
+      }'
+      exit 0
+    fi
+    # F1: consume toolpolicy::announce (Task 2's named consumer) so the open-vs-gated
+    # signal actually ships. Appended to additionalContext so the model sees which
+    # tools stay available while the write is held.
+    _CC_ANN=""
+    if declare -F toolpolicy::announce >/dev/null 2>&1; then _CC_ANN=$(toolpolicy::announce); fi
+    jq -n --arg n "$_DRAIN_N" --arg ann "$_CC_ANN" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: ("Checkpoint write held: " + $n + " subagent(s) still running. Let them return and fold their results into the checkpoint, then write it. Read-only tools remain available."),
+        additionalContext: ("Checkpoint write held: " + $n + " subagent(s) still in flight. Their results must be folded into the progress file before it is written. Do not retry the write until they finish." + (if $ann == "" then "" else " " + $ann end))
+      }
+    }'
+    exit 0
+  fi
+  # Let the one write that clears PENDING through with no nudge attached. Nothing
+  # below gates any more, so this exemption is NOT what prevents a deadlock - it is
+  # noise suppression: without it the checkpoint's own progress-*.md Write would
+  # receive a nudge telling it to write the progress file it is already writing.
+  # PENDING is cleared only by checkpoint-write-trigger's PostToolUse AFTER the
+  # Write completes, so this PreToolUse fire still sees PENDING set on that call.
+  # So let a Write/Edit to a progress-*.md path through untouched.
+  _CC_FP=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+  case "${TOOL_NAME}:$(basename -- "${_CC_FP:-x}")" in
+    Write:progress-*.md|Edit:progress-*.md|MultiEdit:progress-*.md) exit 0 ;;
+  esac
+  # The checkpoint workflow (emitted below) instructs the model to READ the active
+  # template and the pre-rendered scaffold, then compose the progress file from them.
+  # Nothing below gates any more, so exempting these reads is NOT what keeps them
+  # reachable - it is noise suppression: without it the reads that ARE the owed
+  # checkpoint would each draw a nudge telling the model to stop and write. Exempt
+  # reads of the scaffold and the active template so the composition step runs
+  # quietly - they are part of the owed checkpoint, not stray work.
+  if [ "$TOOL_NAME" = "Read" ] && [ -n "$_CC_FP" ]; then
+    _CC_FP_ABS="$_CC_FP"; case "$_CC_FP_ABS" in /*) ;; *) _CC_FP_ABS="$CWD/$_CC_FP_ABS" ;; esac
+    case "$(basename -- "$_CC_FP_ABS")" in
+      *.scaffold.md) exit 0 ;;
+    esac
+    _CC_TPL="$(tpl::resolve_active_template "$PROJECT_DIR" 2>/dev/null || true)"
+    if [ -n "$_CC_TPL" ] && { [ "$_CC_FP_ABS" = "$_CC_TPL" ] || \
+        [ "$(basename -- "$_CC_FP_ABS")" = "$(basename -- "$_CC_TPL")" ]; }; then
+      exit 0
+    fi
+  fi
+  # --- AUTOMATED path: nudge, never gate --------------------------------------
+  # Absence of the manual marker means this checkpoint was threshold-fired and no
+  # user is in the loop. Emit the write instruction and get out of the way - no
+  # counter, no escalation, no permission decision at any call count. The manual
+  # branch below does the same; the two stay separate modules only so their
+  # telemetry stays distinguishable.
+  #
+  # Telemetry: log a `pending-automated` event - no counter file, no attempt
+  # number, no permission decision. Cardinality is one per owed tool call. It
+  # records that an automated checkpoint is still owed. The terminal-state record
+  # (cleanup-on-exit.sh `abandoned-pending`) is too narrow on its own: it is gated
+  # on DONE staying unlatched, so once the checkpoint is eventually written it never
+  # fires and no per-call trail survives.
+  #
+  # Placed AFTER the drain gate and AFTER the write/read exemptions on purpose:
+  # the gate stays composed on both paths, and the exemptions still short-circuit
+  # first so this branch never sees the checkpoint's own tool calls.
+  if [ ! -f "/tmp/baton-manual-${SESSION_ID}" ]; then
+    log_event "$PROJECT_DIR" checkpoint pending-automated \
+      "session_id=$SESSION_ID" 2>/dev/null || true
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         additionalContext: "CHECKPOINT STILL PENDING - the progress file has not been written yet. Stop other work and write it before continuing. If subagents are still running, let them return and fold their results into the checkpoint first, so nothing in flight is lost."
       }
     }'
+    exit 0
   fi
+  # --- MANUAL path: nudge, never gate ------------------------------------------
+  # A manual checkpoint has a user in the loop, so a reminder is useful where the
+  # automated path's would only talk to itself. What it must NOT do is gate: while
+  # PENDING is set the progress file has not been written, and any deny here can
+  # land on a tool call the checkpoint workflow itself needs. The old counter tried
+  # to buy safety with an exemption list, which is a denylist inversion - whatever
+  # nobody enumerated stayed blockable. Nothing is gated before the write now, so
+  # there is no list to keep complete.
+  #
+  # Kept separate from the automated branch above on purpose: the two paths are
+  # separate modules and their telemetry stays distinguishable, even though the
+  # text they emit is now identical.
+  log_event "$PROJECT_DIR" checkpoint pending-manual \
+    "session_id=$SESSION_ID" 2>/dev/null || true
+  jq -n '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      additionalContext: "CHECKPOINT STILL PENDING - the progress file has not been written yet. Stop other work and write it before continuing. If subagents are still running, let them return and fold their results into the checkpoint first, so nothing in flight is lost."
+    }
+  }'
   exit 0
 fi
 
@@ -424,6 +539,7 @@ export ROLLOFF_PRIOR_PROGRESS
 # tpl::render_progress_file reads ROLLOFF_PRIOR_PROGRESS to substitute
 # <<ARCHIVED_CHECKBOXES>> from the prior file's ## Archived body.
 SCAFFOLD_PATH="${PROGRESS_PATH%.md}.scaffold.md"
+mkdir -p "$(dirname "$SCAFFOLD_PATH")" 2>/dev/null || true
 tpl::render_progress_file "$TEMPLATE_PATH" "$WORKSTREAM" "$PROJECT_DIR" > "$SCAFFOLD_PATH" 2>/dev/null || cp "$TEMPLATE_PATH" "$SCAFFOLD_PATH"
 
 # Extract the literal Session Directive block from the active template for V2 re-injection.

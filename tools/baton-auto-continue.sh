@@ -16,6 +16,13 @@ command -v tmux >/dev/null 2>&1 || exit 0
 
 : "${_AUTO_CONTINUE_POLL_INTERVAL:=0.3}"   # seconds between pane-readiness polls
 : "${_AUTO_CONTINUE_POLL_MAX_SECONDS:=60}" # bounded max-wait, then give up cleanly
+# Settle gap between typing the nudge text and sending Enter. /clear rides one
+# send-keys call (text+Enter atomic) and submits fine; the nudge MUST split into a
+# `-l` literal-text send + a separate Enter (a lone `Enter` arg under `-l` would be
+# typed as the word). With no gap the Enter races Claude Code's input debounce and
+# lands before the text commits, so the nudge sits unsent in the box. This delay
+# lets the typed text register first. Tunable; tests set 0.
+: "${_AUTO_CONTINUE_NUDGE_SETTLE:=0.5}"    # seconds between nudge text and Enter
 # Resolve the two tmux-driver knobs through the shared config helper so a `/baton set
 # BATON_AUTO_CONTINUE_NUDGE=...` is honored by this detached injector, not just persisted
 # (env > config.json > default). Guard-source the resolver like the hooks do; if it is
@@ -95,6 +102,8 @@ _wait_ready || { _log cleared-not-continued-prompt-timeout; exit 0; }
 # Guard both sends: a failure here (pane died between poll and send) must NOT be
 # recorded as `continued`. An accurate terminal record is the owner rule.
 tmux send-keys -t "$PANE" -l -- "$BATON_AUTO_CONTINUE_NUDGE" 2>/dev/null || { _log fail-nudge-send; exit 0; }
+# Let the typed text register before Enter (see _AUTO_CONTINUE_NUDGE_SETTLE above).
+sleep "$_AUTO_CONTINUE_NUDGE_SETTLE" 2>/dev/null || true
 tmux send-keys -t "$PANE" Enter 2>/dev/null || { _log fail-nudge-send; exit 0; }
 _log continued
 exit 0

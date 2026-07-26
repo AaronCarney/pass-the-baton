@@ -68,7 +68,7 @@ bash tools/install.sh --target /path/to/your/project
 
 5 interactive prompts; or `--non-interactive` for CI / scripted installs. It's idempotent - re-running is a no-op.
 
-**Platforms.** Linux and WSL2 are the primary targets. **macOS / BSD support is deferred** - the hooks use GNU `grep -P \K` and GNU `find -mmin` (see [`docs/install.md` § Platform Support](docs/install.md#platform-support)).
+**Platforms.** Linux and WSL2 are the primary targets. **macOS / BSD support is deferred** - the hooks use GNU `grep -P \K`, GNU `find -mmin`, and GNU `find -printf` (see [`docs/install.md` § Platform Support](docs/install.md#platform-support)).
 
 **Core install** needs `jq`, `flock`, GNU `grep`/`find`, `md5sum`, `bash 4.4+`.
 **Analysis tools** (`tools/query.sh`, `tools/recommend.sh`, `tools/cost-compare.sh`) need `duckdb`, `bc`, and `python3 -m pip install -r requirements.txt`. The installer warns if any are missing - core install still proceeds.
@@ -117,6 +117,10 @@ Full env-var table (paths, TTLs, archive dirs): [`docs/context-baton.md` § Conf
 After a checkpoint saves, Pass the Baton can continue the session for you instead of leaving you to `/clear` and re-prompt by hand. The driver is the `auto_continue_mode` config key (`off` by default; `tmux` drives `/clear` + a continue nudge into your pane, `relaunch` runs a fresh-session supervisor loop). Opt into a `baton` launch alias at install time (the 6th prompt) - then you launch with `baton` instead of `claude`, and it honors whichever driver you've set. Switch drivers any time with `/baton set auto_continue_mode=tmux`. Details: [`docs/configuration.md` § Auto-continue](docs/configuration.md).
 
 Need to hand off early, before the threshold trips? Run **`/pass-the-baton:renew`** - it fires a checkpoint immediately, running the identical save-and-handoff path as an automatic threshold crossing, independent of the reported context %.
+
+Need it out of the way instead? **`/pass-the-baton:off`** disables checkpointing
+for the rest of the session; **`/pass-the-baton:snooze [minutes]`** defers it
+(default 10, max 120). Neither saves what is already owed.
 
 ### `/baton` skill + progress-file templates
 
@@ -233,7 +237,7 @@ Prompt and completion text are never captured by either writer; tool arguments a
 
 ## Tests
 
-141 shell test suites, grouped by concern:
+149 shell test suites, grouped by concern:
 
 - **Core flow:** `test-workstream-hooks.sh`, `test-restore-workstream.sh`, `test-prompt-sync.sh`
 - **Install / verify:** `test-install-tools.sh`, `test-installer-nfs-warn.sh`, `test-installer-post-tool-batch.sh`, `test-installer-tool-timing.sh`, `test-doctor.sh`

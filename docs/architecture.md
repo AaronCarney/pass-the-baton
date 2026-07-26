@@ -13,10 +13,12 @@ The hooks are the only code Claude Code invokes directly. They fire on lifecycle
 - **Inject** (`session-start.sh`, SessionStart) - resolves which workstream this terminal binds to and injects its bound progress as a mandatory directive.
 - **Cost** (`post-tool-batch.sh`, PostToolBatch) - per-turn token usage from the transcript into a `cost_rollup` event.
 - **Subagent cost** (`post-subagent-cost.sh`, SubagentStop) - each finished sub-agent's own transcript usage, stamped to the open arc.
+- **Subagent track** (`subagent-track-start.sh`, SubagentStart) - writes one marker per in-flight subagent so the parent's checkpoint write can be held until every subagent returns.
 - **Latency** (`tool-timing.sh`, PostToolUse) - opt-in per-tool timing into `tool_call` events.
 - **Cleanup** (`cleanup-on-exit.sh`, SessionEnd) - per-session housekeeping on terminal close.
 - **Detect** (`project-detect.sh`, UserPromptSubmit) - detects `projects/<name>` mentions and explicit renames; updates the workstream `display_name`.
 - **Outcome proxies** (`outcome-proxy-code-execution.sh`, `outcome-proxy-retry-density.sh`) - opt-in signals derived from the same session stream.
+- **Relaunch** (`stop-relaunch-trigger.sh`, Stop) - at turn end, arms the fresh-relaunch auto-continue driver when a checkpoint handoff is pending.
 
 The continuity path is **trigger → save → inject**: the trigger sets a pending flag, the next progress write saves and archives, and a later SessionStart injects that progress back. On SessionStart, the workstream is resolved by a fixed routing precedence: `AGENT_SESSION_ID` (sub-agents short-circuit here to a read-only fast path) → `WORKSTREAM` env var → terminal-hash lookup → fresh workstream. Rather than restate every hook's exact behavior, see the per-hook table in the [README How It Works](../README.md#how-it-works).
 

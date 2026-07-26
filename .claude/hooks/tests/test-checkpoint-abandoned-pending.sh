@@ -62,20 +62,20 @@ else
   _ok "A4: no abandoned-pending when no checkpoint was owed"
 fi
 
-# A5: the nag counter must not outlive the session. This is the consumer-side
-# assertion for the /tmp/baton-nag-<sid> contract task 2 produces. It is not
-# inert bookkeeping: the counter is keyed by session id, so a survivor means a
-# session that reuses the id resumes at the escalated count and hard-denies on
-# its first tool call. Task 2's own test removes this file by hand, which is
-# itself evidence that nothing else does.
+# A5: a stray /tmp/baton-nag-<sid> must not outlive the session. The nag counter is
+# retired (E3 deleted the machinery), so this file is now dead state from a mechanism
+# that no longer runs. A5 seeds it by hand below, runs the session-end reaper, and
+# asserts the reaper removed it - the standing proof that stale counter state cannot
+# survive a session and become load-bearing again. The seeding is what exercises the
+# reaper; drop it and the case asserts nothing.
 proj=$(mkproj); sid="aband-a5-$$"
 echo 2 > "/tmp/baton-nag-${sid}"
 run_co "$proj" "$sid"
 if [ -f "/tmp/baton-nag-${sid}" ]; then
-  _bad "A5: nag counter removed on session end"
+  _bad "A5: stale counter file removed on session end"
   rm -f "/tmp/baton-nag-${sid}"
 else
-  _ok "A5: nag counter removed on session end"
+  _ok "A5: stale counter file removed on session end"
 fi
 
 echo; echo "Results: $PASS passed, $FAIL failed"

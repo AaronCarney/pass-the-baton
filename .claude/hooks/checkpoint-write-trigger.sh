@@ -317,9 +317,29 @@ if [ -f "$ARCHIVE_LIST" ]; then
   rm -f "$ARCHIVE_LIST"
 fi
 
-# Terminal state: clear PENDING, set DONE
+# Manual checkpoints (armed via /renew) get a one-paragraph handoff synopsis; the
+# automated (threshold) path does not - emitting it there is pure token waste. The
+# marker is CREATED by context-checkpoint.sh when it consumes the force flag, and
+# dropped here once the manual save actually lands.
+_WT_MANUAL="/tmp/baton-manual-${SESSION_ID}"
+_WT_IS_MANUAL=0
+if [ -f "$_WT_MANUAL" ]; then _WT_IS_MANUAL=1; rm -f "$_WT_MANUAL"; fi
+
+# Terminal state. PENDING is cleared on BOTH paths - cleanup-on-exit.sh gates its
+# `abandoned-pending` record on PENDING still being present, so clearing it here is
+# what keeps a successful manual save from being recorded as abandoned.
+# The DONE latch is what blocks further work and what both auto-continue drivers key
+# on (stop-relaunch-trigger.sh, baton-auto-continue.sh), so on the MANUAL path it is
+# deferred until the user has answered: the progress file exists, and only then is
+# consent asked. tools/baton-consent.sh latches DONE on `clear`, and on `keep` clears
+# the trigger FLAG instead so the session re-arms. The AUTOMATED path is unchanged -
+# nobody is in the loop, so it latches immediately.
 rm -f "$PENDING"
-touch "$DONE_FLAG"
+if [ "$_WT_IS_MANUAL" = 1 ]; then
+  : > "/tmp/baton-consent-${SESSION_ID}" || true
+else
+  touch "$DONE_FLAG"
+fi
 
 # E6 same-terminal automation (opt-in, tmux-only). Spawn the detached injector
 # that sends /clear + a continue nudge into this pane so the human does not have
@@ -329,7 +349,10 @@ touch "$DONE_FLAG"
 # spawn and the injector's first poll-until-idle correctly waits for THIS turn to
 # end before sending /clear. Moving the spawn to a Stop/idle hook would make the
 # pane already-idle at spawn and fire /clear prematurely - do not relocate it.
-if [ "$(_cfg::auto_continue_mode)" = "tmux" ] && [ -n "${TMUX:-}" ]; then
+# Manual path is excluded: DONE is deferred until the user answers the consent
+# question, so an injector spawned here would exit immediately on its DONE check.
+# A `clear` answer latches DONE, and the Stop-hook relaunch driver picks it up then.
+if [ "$_WT_IS_MANUAL" = 0 ] && [ "$(_cfg::auto_continue_mode)" = "tmux" ] && [ -n "${TMUX:-}" ]; then
   _AC_PANE=""
   [ -f "$TERM_FILE" ] && _AC_PANE=$(jq -r '.tmux_pane // empty' "$TERM_FILE" 2>/dev/null)
   if [ -n "$_AC_PANE" ]; then
@@ -368,9 +391,24 @@ fi
 
 PCT=$(cat "/tmp/claude-context-pct-${SESSION_ID}" 2>/dev/null || echo "")
 [[ "$PCT" =~ ^[0-9]+$ ]] || PCT=""
-jq -n --arg pct "$PCT" '{
-  hookSpecificOutput: {
-    hookEventName: "PostToolUse",
-    additionalContext: ("Checkpoint save complete. Active pointer updated, old progress files archived. Tell the user: \"" + (if $pct == "" then "Progress saved." else "Context at " + $pct + "%. Progress saved." end) + " Please /clear to continue.\" Do NOT take any further actions - subsequent tool calls will be blocked.")
-  }
-}'
+if [ "$_WT_IS_MANUAL" = 1 ]; then
+  # Resolve the consent tool to an ABSOLUTE path at emit time. This string is run
+  # by the model via its Bash tool, whose cwd is the user's project (no tools/ dir
+  # under a plugin install), so a bare relative path fails. CLAUDE_PLUGIN_ROOT is
+  # not guaranteed in that env either, so resolve from our own SCRIPT_DIR - the
+  # tools/ dir lives two levels up (precedent: stop-relaunch-trigger.sh:82).
+  CONSENT_TOOL="$(cd "$SCRIPT_DIR/../.." && pwd)/tools/baton-consent.sh"
+  jq -n --arg pct "$PCT" --arg consent "$CONSENT_TOOL" '{
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      additionalContext: ("Checkpoint save complete (manual). Active pointer updated, old progress files archived. Now give the user a BRIEF synopsis (2-4 sentences): what state was captured, the workstream/progress file it was saved to, and the single next action the handoff points at. Then say: \"" + (if $pct == "" then "Progress saved." else "Context at " + $pct + "%. Progress saved." end) + " Keep working in this session, or clear now?\" and STOP - wait for their answer. When they answer, run exactly one of: `" + $consent + " keep` (they are continuing) or `" + $consent + " clear` (they are done - then tell them to /clear). Nothing is blocked in the meantime; the progress file is already written.")
+    }
+  }'
+else
+  jq -n --arg pct "$PCT" '{
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      additionalContext: ("Checkpoint save complete. Active pointer updated, old progress files archived. Tell the user: \"" + (if $pct == "" then "Progress saved." else "Context at " + $pct + "%. Progress saved." end) + " Please /clear to continue.\" Do NOT take any further actions - subsequent tool calls will be blocked.")
+    }
+  }'
+fi

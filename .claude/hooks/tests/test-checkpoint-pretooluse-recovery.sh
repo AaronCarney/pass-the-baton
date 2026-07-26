@@ -186,11 +186,15 @@ run_d1() {
 }
 run_d1
 
-# C1: the subagent DONE guard must also explain itself.
+# C1: the subagent branch nudges and ALLOWS - it never denies.
 # Drives the REAL branch: agent_id in the stdin JSON, plus the parent-sid,
-# parent-pct and parent-DONE files the branch reads on its way to the guard.
+# parent-pct and parent-DONE files the branch reads on its way through.
 # term_hash is md5("$USER:$CLAUDE_TERMINAL_ID"), so the parent-sid file must be
 # named under the SAME USER the hook runs with - USER=u, as everywhere else here.
+# Cutting a subagent off drops the work it was dispatched to produce; the parent's
+# checkpoint WRITE is held by the drain gate instead, so results are folded in.
+# A parent DONE marker is no longer a subagent guard - it is set here to prove
+# exactly that: the old deny path is gone even with DONE present.
 run_c1() {
   local proj; proj=$(mkproj)
   local sid="sid-c1-$$" psid="psid-c1-$$" term="term-c1-$$"
@@ -207,11 +211,15 @@ run_c1() {
     BATON_DIR="$proj/docs/sessions/.tracking" \
     BATON_PROGRESS_DIR="$proj/docs/sessions" \
     bash "$CC" 2>/dev/null)
-  assert_contains "C1: subagent guard explains itself in permissionDecisionReason" \
-    "$out" '"permissionDecisionReason": "Parent session checkpoint complete.'
-  assert_absent "C1b: C1 drove the SUBAGENT guard, not the main one" \
+  assert_contains "C1: subagent gets the wrap-up nudge" \
+    "$out" 'return your results to the parent'
+  assert_contains "C1a: subagent branch allows" \
+    "$out" '"permissionDecision": "allow"'
+  assert_absent "C1b: C1 drove the SUBAGENT branch, not the main one" \
     "$out" 'Tell the user to /clear'
-  rm -f "/tmp/claude-parent-sid-${th}"
+  assert_absent "C1c: subagents are never denied" \
+    "$out" '"deny"'
+  rm -f "/tmp/claude-parent-sid-${th}" "/tmp/claude-subagent-checkpoint-${sid}"
   cleanup_sid "$sid"; cleanup_sid "$psid"; rm -rf "$proj"
 }
 run_c1
@@ -287,17 +295,16 @@ run_p2() {
   out4=$(run_cc_noreset "$proj" "$sid" "term-p2-$$")
   # P2 asserts the SOFT payload specifically, not the bare word CHECKPOINT.
   # 'CHECKPOINT' is a substring of BOTH arms ("CHECKPOINT STILL PENDING - " and
-  # "CHECKPOINT STILL UNSAVED. "), so the loose form passes on an implementation
-  # that denies from the very first re-fire - i.e. it cannot observe the nag
-  # limit this step spends a paragraph justifying. P2f/P2g are the other half:
-  # out2 and out3 are pre-limit fires (NAG=1 and NAG=2 against a limit of 3) and
-  # must NOT deny. Without them, deleting the else arm entirely still passes.
+  # "CHECKPOINT STILL UNSAVED. "), so the loose form would pass even on an
+  # implementation that denied a re-fire. P2f/P2g are the other half: out2 and
+  # out3 are ordinary re-fires and must NOT deny - after E3 nothing denies before
+  # the write on any path. Without them, dropping the soft re-assert still passes.
   assert_contains "P2: re-fire re-asserts with the soft payload" "$out2" 'CHECKPOINT STILL PENDING'
   assert_absent   "P2f: does not deny before the limit" "$out2" '"permissionDecision": "deny"'
   assert_absent   "P2g: does not deny on the second re-fire either" "$out3" '"permissionDecision": "deny"'
-  assert_contains "P2b: escalates to deny once the nag limit is reached" "$out4" '"permissionDecision": "deny"'
-  assert_contains "P2c: pending-unsatisfied is recorded" \
-    "$(cat "$tr/hook-events.jsonl" 2>/dev/null)" 'pending-unsatisfied'
+  assert_absent  "P2b: automated path never escalates to deny" "$out4" '"permissionDecision": "deny"'
+  assert_contains "P2c: pending-automated is recorded" \
+    "$(cat "$tr/hook-events.jsonl" 2>/dev/null)" 'pending-automated'
   cleanup_sid "$sid"; rm -f "/tmp/baton-nag-${sid}"; rm -rf "$proj"
 }
 run_p2
@@ -306,8 +313,8 @@ run_p2
 # checkpoint has been successfully written. It must stay silent. This is the
 # highest-blast-radius regression in the change: if the PENDING half of the
 # re-arm condition is dropped or inverted, every post-checkpoint tool call for
-# the rest of the session nags and then hard-denies at the limit, on sessions
-# that did exactly what they were asked. Nothing else in the suite drives it.
+# the rest of the session re-asserts the checkpoint reminder, on sessions that
+# did exactly what they were asked. Nothing else in the suite drives it.
 run_p2d() {
   local proj; proj=$(mkproj)
   local sid="sid-p2d-$$"
@@ -321,17 +328,16 @@ run_p2d() {
 }
 run_p2d
 
-# P2h: the hard deny must NEVER block the progress-file write itself. This hook
-# is PreToolUse; PENDING is cleared only by checkpoint-write-trigger's PostToolUse
-# AFTER a progress-*.md Write runs. So without the checkpoint-write exemption a
-# re-fire at the nag limit denies the Write that would clear PENDING, deadlocking
-# the checkpoint the nag demands. Drive a Write to a progress path with the nag
-# already past the limit and assert it is allowed through.
+# P2h: the progress-file write must be reachable while a checkpoint is owed. This
+# hook is PreToolUse; PENDING is cleared only by checkpoint-write-trigger's
+# PostToolUse AFTER a progress-*.md Write runs. So a Write to a progress path has
+# to pass through even with a checkpoint outstanding, or the write that clears
+# PENDING could never run. Drive that Write and assert it is allowed through.
 run_p2h() {
   local proj; proj=$(mkproj)
   local sid="sid-p2h-$$"
   run_cc "$proj" "$sid" "term-p2h-$$" >/dev/null    # arms FLAG + PENDING
-  echo 9 > "/tmp/baton-nag-${sid}"                  # already past the deny limit
+  echo 9 > "/tmp/baton-nag-${sid}"                  # stale counter state; must resurrect nothing
   echo 99 > "/tmp/claude-context-pct-${sid}"
   local out
   out=$(jq -n --arg sid "$sid" --arg cwd "$proj" --arg fp "$proj/docs/sessions/progress-carry-ws.md" \
@@ -344,9 +350,9 @@ run_p2h() {
   assert_absent "P2h: nag never denies the progress-file write" "$out" '"permissionDecision": "deny"'
   # The exemption case has three arms (Write|Edit|MultiEdit) and PENDING is cleared
   # by a PostToolUse whose matcher is Write|Edit|MultiEdit, so a scaffold filled in
-  # place via Edit/MultiEdit is a first-class PENDING-clearing path. Drive both at
-  # the same over-limit state; a drifted arm here deadlocks exactly as a missing
-  # Write arm would, and neither must be denied.
+  # place via Edit/MultiEdit is a first-class PENDING-clearing path. Drive both with
+  # a checkpoint owed; a drifted arm here would block the write that clears PENDING,
+  # and neither must be denied.
   local outE
   outE=$(jq -n --arg sid "$sid" --arg cwd "$proj" --arg fp "$proj/docs/sessions/progress-carry-ws.md" \
     '{session_id:$sid, cwd:$cwd, tool_name:"Edit", tool_input:{file_path:$fp}}' | \
@@ -365,8 +371,10 @@ run_p2h() {
     BATON_PROGRESS_DIR="$proj/docs/sessions" \
     bash "$CC" 2>/dev/null)
   assert_absent "P2k: nag never denies a MultiEdit to the progress file" "$outM" '"permissionDecision": "deny"'
-  # A non-progress write at the same over-limit state MUST still be denied, or the
-  # exemption is too wide and the nag has no teeth.
+  # A non-progress write with the same seeded counter is NOT denied on the automated
+  # path: E1 removed the hard deny there. The progress-write exemptions above still
+  # short-circuit first, so this is not the exemption widening - it is the automated
+  # branch emitting the soft write instruction and never a deny.
   local out2
   out2=$(jq -n --arg sid "$sid" --arg cwd "$proj" --arg fp "$proj/src/x.py" \
     '{session_id:$sid, cwd:$cwd, tool_name:"Write", tool_input:{file_path:$fp}}' | \
@@ -375,7 +383,7 @@ run_p2h() {
     BATON_DIR="$proj/docs/sessions/.tracking" \
     BATON_PROGRESS_DIR="$proj/docs/sessions" \
     bash "$CC" 2>/dev/null)
-  assert_contains "P2i: non-progress write past the limit is still denied" "$out2" '"permissionDecision": "deny"'
+  assert_absent "P2i: automated path never denies a non-progress write past the limit" "$out2" '"permissionDecision": "deny"'
   cleanup_sid "$sid"; rm -f "/tmp/baton-nag-${sid}"; rm -rf "$proj"
 }
 run_p2h

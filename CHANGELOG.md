@@ -6,6 +6,157 @@ All notable changes to Pass the Baton are documented here. The format is based o
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-25
+
+### Added
+
+- **Subagent drain gate: a checkpoint no longer writes while subagents are still
+  running.** Previously the parent wrote its progress file the moment the
+  threshold was crossed, capturing a snapshot that was missing whatever the
+  in-flight subagents were still computing, and the subagents themselves were
+  hard-blocked once the parent's DONE flag went up. That is inverted: the
+  subagents run to completion and the parent's checkpoint WRITE is what waits.
+  While any subagent is in flight the parent's consequential tool calls are
+  denied with `Checkpoint write held: N subagent(s) still running`; read-only
+  tools stay open. Once the last one returns, the write proceeds with their
+  results folded in. If a subagent outruns **`BATON_DRAIN_TIMEOUT_SECS`**
+  (default `360`, measured from subagent start, so total elapsed runtime rather
+  than idle time) you are asked whether to write without it: Allow discards
+  whatever it has not returned, Deny keeps waiting. The gate depends on the
+  `SubagentStart` hook being registered - see the Fixed entry below - and does
+  nothing silently until it is.
+
+- **`/pass-the-baton:off` and `/pass-the-baton:snooze [minutes]`.** Two escapes
+  from an owed checkpoint that do not require arguing with the nag. `off`
+  disables the entire checkpoint lifecycle for the current session (no trigger,
+  no gate, no nag) until you start a new one. `snooze` defers it, default 10
+  minutes, bounded by **`BATON_SNOOZE_MAX_MIN`** (default `120`) on the grounds
+  that a longer deferral is really a decision to stop checkpointing, which is
+  what `off` is for. Snoozing with a checkpoint already owed warns that it
+  defers the reminder and not the obligation.
+
+- **Manual checkpoints ask for consent after the save, not before each tool
+  call.** A checkpoint armed with `/pass-the-baton:renew` now writes its progress
+  file first and asks the user once, afterward, whether to keep working or clear -
+  replacing the earlier menu that prompted on every consequential tool call before
+  anything was saved. When the manual save lands, the model reports a brief
+  synopsis and asks "Keep working in this session, or clear now?", then stops;
+  nothing is blocked while the user decides, because the progress file is already
+  on disk. The answer is resolved by `tools/baton-consent.sh`: `keep` clears the
+  session's trigger flag so the threshold re-arms for the next crossing, while
+  `clear` latches the done flag and hands off (the user is told to `/clear`). The
+  outstanding-consent marker is reaped at `SessionEnd` and by the cron TTL sweep,
+  so a question left unanswered never wedges the session.
+
+- **Manual checkpoints emit a handoff synopsis.** After a `/renew` save
+  completes, the model reports in 2-4 sentences what state was captured, which
+  workstream and progress file it landed in, and the single next action the
+  handoff points at. Threshold-fired checkpoints do not do this - nobody is
+  there to read it.
+
+- **Interactive tabbed dashboard: `baton-dashboard.sh tui`.** Four panes -
+  Status (live context fill, threshold, auto-continue mode, whether a checkpoint
+  is owed), Config, History, Workstreams. Falls back to plain `show` when there
+  is no TTY, so scripted and piped callers are unaffected.
+
+- **`BATON_SWEEP_INTERVAL_HOURS` is now visible and settable from the
+  dashboard.** It appears in `show` with its effective source and accepts
+  `baton-dashboard.sh set BATON_SWEEP_INTERVAL_HOURS=<n>` like the other TTLs.
+
+### Changed
+
+- **BREAKING: tty-derived terminal hashes are now salted with the kernel boot id.**
+  The `term_hash` tiers that derive from a tty (the fallback path taken when
+  `CLAUDE_TERMINAL_ID` is unset) now fold in the kernel boot id, so a tty device
+  name recycled across a reboot can no longer bind a resumed session to a previous
+  boot's workstream. The explicit `CLAUDE_TERMINAL_ID` tier is unchanged. This is a
+  breaking change to the terminal-hash filename convention published in
+  [`docs/public-api.md`](docs/public-api.md), so the release that ships it takes a
+  **major** version bump (the release process assigns the number; this lands under
+  `[Unreleased]`). Migration: no action required, but every terminal-keyed artifact
+  rekeys exactly once on the first hook fire after upgrading -
+  `$BATON_DIR/terminals/<hash>.json` and `/tmp/claude-parent-sid-<hash>`. Old
+  files are orphaned rather than read, reaped by
+  `tools/cleanup-cron.sh` on normal TTL. Live sessions re-resolve through the
+  session-id path `session-start.sh` owns. Within a single boot nothing moves.
+
+- **Threshold-fired checkpoints no longer nag.** An automated checkpoint has no
+  user in the loop, so the interactive escalation that guarded it (a per-tool-call
+  counter at `/tmp/baton-nag-<session>`, a `pending-unsatisfied` event per attempt,
+  and a hard `deny` once the counter crossed `_CC_NAG_LIMIT`) applied an
+  interactive device to a non-interactive path: it could trap a model with no way
+  to answer the prompt. The automated path now emits the checkpoint write
+  instruction and nothing else, at any attempt count. Telemetry is de-escalated
+  rather than dropped: the per-attempt `pending-unsatisfied` is replaced on this
+  path by a non-escalating `pending-automated` event, one per owed tool call with
+  no counter, so the owed-checkpoint signal survives without the escalation. **Manual checkpoints armed via
+  `/pass-the-baton:renew` still emit the reminder**, because a human is there to
+  read it - that is now the whole of the difference from the automated path,
+  whose emitted text is identical and which is told apart only by its telemetry
+  event (`pending-manual` on the manual path, `pending-automated` on the
+  automated one). The pre-tool-call consent menu the manual path once
+  carried was already replaced by the post-save consent flow described above. The
+  never-written-checkpoint signal is likewise unaffected: `cleanup-on-exit.sh`
+  still records `abandoned-pending` when a checkpoint outlives its session
+  undelivered.
+
+### Fixed
+
+- **The relaunch driver replayed session-selection flags, so a checkpoint
+  relaunch parked on the session picker.** The supervisor loop re-ran the
+  original argv on every iteration, so a terminal launched as `baton --resume`
+  met the interactive picker instead of continuing, and `baton --resume <id>` or
+  `baton --continue` would have re-entered the very session the checkpoint had
+  just handed off from. `-r`, `--resume`, `-c` and `--continue` now apply to the
+  first launch only and are dropped from every relaunch; `--resume` consumes a
+  following session id only when one is present, so `--resume --model opus`
+  keeps `--model`. Every other argument still passes through untouched.
+
+- **`tools/install.sh` never actually installed the cron wrapper.** Step 7
+  invoked `tools/install-cron.sh --dry-run`, which by contract writes nothing, so
+  the `BATON_*` answers the installer collects and exports for it - the archive
+  directory among them - reached a child that discarded them, and neither the env
+  file nor the wrapper was ever created. It now runs for real. This does not
+  touch your crontab: `install-cron.sh` only ever prints the line to paste, in
+  every mode, and `uninstall.sh` already removes the env file and wrapper.
+
+- **`SubagentStart` was not registered in either install channel, so nothing
+  that depends on it ran.** Plugin installs now declare it in
+  `hooks/hooks.json`; `tools/install.sh` installs merge it into
+  `~/.claude/settings.json` through `tools/merge-settings.sh`. Verify with
+  `jq -e '.hooks.SubagentStart' hooks/hooks.json`, and re-run `tools/install.sh`
+  after upgrading if your install uses the settings channel.
+
+- **The tmux auto-continue nudge could be typed into the prompt and never
+  sent.** `/clear` rides a single atomic `send-keys` and submitted fine, but the
+  nudge has to split into a literal-text send plus a separate `Enter`, and with
+  no gap between them the `Enter` raced Claude Code's input debounce and landed
+  before the text committed - leaving the nudge sitting unsent in the box and
+  the session stalled after the clear. A settle delay now separates the two,
+  tunable via `_AUTO_CONTINUE_NUDGE_SETTLE` (default `0.5` seconds).
+
+- **A checkpoint that was owed could block the very reads the checkpoint workflow
+  mandates.** The workflow tells the model to read the active template and the
+  pre-rendered scaffold and compose the progress file from them, but the only
+  exemption while a checkpoint was owed covered the `progress-*.md` write. The model
+  could not reach its required input, reconstructed the Session Directive from
+  memory, and validation rejected the imperfect copy: an unrecoverable deadlock.
+  Reads of `*.scaffold.md` and of the resolved active template are now exempt
+  while a checkpoint is owed, so the composition step can reach its inputs.
+
+- **The owed-checkpoint reminder can no longer hold a tool call before the
+  progress file is written.** The escalation and its per-tool-call counter are
+  gone from BOTH the automated and the manual path: the reminder is now just a
+  reminder, with no attempt limit and no `deny` at any call count. This closes
+  the deadlock class the exemption above only narrowed - because the reminder no
+  longer gates before the write, the read/write exemption list (the `progress-*.md`
+  write and the scaffold/active-template reads) is no longer what keeps the save
+  reachable; it now only suppresses the reminder on the checkpoint's own tool
+  calls. Two denies remain, both outside this change: the **drain gate** holds
+  consequential tool calls (the write included) while subagents are still in
+  flight, leaving read-only tools open, and the **DONE guard** blocks every tool
+  call after the checkpoint has been written, until you `/clear`.
+
 ---
 
 ## [0.4.0] - 2026-07-22

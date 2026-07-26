@@ -15,6 +15,41 @@ fi
 CLAUDE_BIN="${_CLAUDE_BIN:-claude}"   # test seam, underscore-private: not a public knob
 TMUX_BIN="${_TMUX_BIN:-tmux}"         # test seam
 
+# Session-selection flags choose which session the FIRST launch attaches to; they are
+# meaningless on a relaunch and actively harmful. Bare `--resume` opens the interactive
+# picker, so replaying it parks the relaunch on a UI instead of continuing, and
+# `--resume <id>` / `--continue` would re-enter the very session the checkpoint just
+# handed off from - the opposite of the fresh context the driver exists to provide.
+# Result lands in _relaunch_argv (bash cannot return an array).
+#
+# Two accepted limitations, both measured as negligible against the real `claude` flag
+# surface (`-r, --resume [value]`, `-c, --continue`), not oversights:
+#  - Bundled short flags are not split, so `-rd` would survive the filter. Bundling a
+#    session-selection flag with another short flag is not a form anyone uses.
+#  - The filter is flag-agnostic: it does not know which other flags take a value, so a
+#    value that is literally `--resume`/`-c` would be stripped. No real invocation
+#    produces one (model names, paths, tools and prompts are never these tokens).
+_strip_session_flags() {
+  _relaunch_argv=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -c|--continue) ;;
+      -r|--resume)
+        # The session id is OPTIONAL: consume the next token only when one exists and
+        # is not itself a flag, so `--resume --model opus` keeps --model.
+        if [ $# -gt 1 ]; then
+          case "$2" in
+            -*) ;;
+            *) shift ;;
+          esac
+        fi
+        ;;
+      *) _relaunch_argv+=("$1") ;;
+    esac
+    shift
+  done
+}
+
 # Fresh-relaunch supervisor (E6 driver option 2). All relaunch-specific env is set
 # HERE, not at top level, so tmux/off launches never carry the supervisor signal.
 _run_relaunch() {
@@ -35,9 +70,16 @@ _run_relaunch() {
     ''|*[!0-9]*) _log "warn-bad-relaunch-max value=$BATON_RELAUNCH_MAX using=10"; BATON_RELAUNCH_MAX=10 ;;
   esac
   local _iter=0
+  _strip_session_flags "$@"
   while :; do
     rm -f "$BATON_RELAUNCH_REQ"
-    "$CLAUDE_BIN" "$@"   # foreground; exit code deliberately ignored
+    # Iteration 0 gets the user's argv verbatim; every relaunch gets it without the
+    # session-selection flags. `${a[@]+"${a[@]}"}` keeps an empty array legal under set -u.
+    if [ "$_iter" -eq 0 ]; then
+      "$CLAUDE_BIN" "$@"   # foreground; exit code deliberately ignored
+    else
+      "$CLAUDE_BIN" ${_relaunch_argv[@]+"${_relaunch_argv[@]}"}
+    fi
     [ -f "$BATON_RELAUNCH_REQ" ] || break   # no marker = user-initiated exit = done
     rm -f "$BATON_RELAUNCH_REQ"
     _iter=$((_iter + 1))

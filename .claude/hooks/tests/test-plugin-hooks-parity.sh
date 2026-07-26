@@ -1,6 +1,6 @@
 #!/bin/bash
-# E-D2 Task 2: hooks/hooks.json must register EXACTLY the 11 canonical hook
-# wirings that the installers produce (merge-settings.sh 8 core + install.sh 3
+# E-D2 Task 2: hooks/hooks.json must register EXACTLY the 12 canonical hook
+# wirings that the installers produce (merge-settings.sh 9 core + install.sh 3
 # telemetry), each command routed through ${CLAUDE_PLUGIN_ROOT} and referencing a
 # bundled .claude/hooks/<name>.sh file.
 #
@@ -28,7 +28,7 @@ assert() {
 }
 
 # Canonical EXPECTED wiring: [event, matcher, script-basename] triples.
-# 8 core (merge-settings.sh EVENTS/MATCHERS/COMMANDS) + 3 telemetry (install.sh).
+# 9 core (merge-settings.sh EVENTS/MATCHERS/COMMANDS) + 3 telemetry (install.sh).
 EXPECTED_TRIPLES=(
   '["PostToolBatch","","post-tool-batch.sh"]'
   '["Stop","","stop-relaunch-trigger.sh"]'
@@ -39,6 +39,7 @@ EXPECTED_TRIPLES=(
   '["SessionEnd","","cleanup-on-exit.sh"]'
   '["SessionStart","","session-start.sh"]'
   '["SubagentStop","","post-subagent-cost.sh"]'
+  '["SubagentStart","","subagent-track-start.sh"]'
   '["UserPromptSubmit","","outcome-proxy-retry-density.sh"]'
   '["UserPromptSubmit","","project-detect.sh"]'
 )
@@ -73,9 +74,9 @@ if [ "$ACTUAL_SORTED" != "$EXPECTED_SORTED" ]; then
   echo "    --- actual ---";   echo "$ACTUAL_SORTED"   | sed 's/^/    /'
 fi
 
-# Registration count is exactly 11.
+# Registration count is exactly 12.
 COUNT="$(jq '[.hooks[][] | .hooks[]] | length' "$HOOKS_JSON")"
-assert "registration count is exactly 11" '[ "$COUNT" = 11 ]'
+assert "registration count is exactly 12" '[ "$COUNT" = 12 ]'
 
 # Every command uses ${CLAUDE_PLUGIN_ROOT} and references an existing bundled file.
 ALL_CMDS="$(jq -r '.hooks[][] | .hooks[] | .command' "$HOOKS_JSON")"
@@ -95,6 +96,16 @@ assert "every command uses \${CLAUDE_PLUGIN_ROOT} + references an existing bundl
 # No command references $CLAUDE_PROJECT_DIR or $REPO_DIR.
 assert "no command references CLAUDE_PROJECT_DIR or REPO_DIR" \
   "! grep -qE 'CLAUDE_PROJECT_DIR|REPO_DIR' '$HOOKS_JSON'"
+
+# merge-settings.sh is the OTHER shipping channel and is NOT covered by the
+# hooks.json parity set above. Run the real merger and assert the wiring lands.
+MS_TMP="$(mktemp -d)"
+bash "$ROOT/tools/merge-settings.sh" "$MS_TMP/settings.json" >/dev/null 2>&1
+MS_CMD="$(jq -r '.hooks.SubagentStart[0].hooks[0].command // ""' "$MS_TMP/settings.json" 2>/dev/null)"
+assert "merge-settings.sh registers SubagentStart" '[ -n "$MS_CMD" ]'
+assert "merge-settings.sh points SubagentStart at subagent-track-start.sh" \
+  'case "$MS_CMD" in *subagent-track-start.sh*) true ;; *) false ;; esac'
+rm -rf "$MS_TMP"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

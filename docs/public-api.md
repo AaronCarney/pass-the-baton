@@ -12,13 +12,13 @@ The public surface is intentionally small:
 4. The `hook-events.jsonl` schema and `schema_version` discipline (see [`docs/telemetry.md`](telemetry.md)).
 5. One script under `tools/`: `install.sh`.
 
-Six additional **observability** hooks ship alongside the core flow with their own (weaker) stability guarantees - see below.
+Eight additional **observability** hooks ship alongside the core flow with their own (weaker) stability guarantees - see below.
 
 Everything else is internal.
 
 ## Claude Code Hooks
 
-Pass the Baton ships ten hook scripts, partitioned into two tiers with different stability commitments. The published plugin wires them via `hooks.json`; the in-repo dev `.claude/settings.json` wires a telemetry-only subset for development.
+Pass the Baton ships twelve hook scripts, partitioned into two tiers with different stability commitments. The published plugin wires them via `hooks.json`; the in-repo dev `.claude/settings.json` wires a telemetry-only subset for development.
 
 ### Core-flow hooks (semver-protected)
 
@@ -35,16 +35,18 @@ These four hooks define the persistence and routing behavior. Their script paths
 
 ### Observability hooks (additive contract)
 
-These six hooks emit telemetry into `hook-events.jsonl` (or do per-session housekeeping) and do not affect persistence routing. They ship with a weaker stability guarantee: behavior can change in minor versions as long as `schema_version` discipline holds for any emitted events.
+These eight hooks emit telemetry into `hook-events.jsonl` (or do per-session housekeeping, or drive session relaunch) and do not affect persistence routing. They ship with a weaker stability guarantee: behavior can change in minor versions as long as `schema_version` discipline holds for any emitted events.
 
 | Hook | When it fires | What we guarantee |
 |---|---|---|
 | `PostToolBatch` (`post-tool-batch.sh`) | End of each turn | Reads transcript usage and emits `cost_rollup`; emits `cache_anomaly` on 2× `cache_creation` jumps. Behavior may change in minor versions; event names and `schema_version` are governed by [§hook-events.jsonl schema](#hook-eventsjsonl-schema) below. |
 | `SubagentStop` (`post-subagent-cost.sh`) | After a Task-tool subagent returns | Reads the subagent's own transcript usage and emits a `cost_rollup` tagged `source:"subagent"`, stamped to the open arc via the inherited terminal id. Behavior may change in minor versions. |
+| `SubagentStart` (`subagent-track-start.sh`) | When a subagent is spawned | Records one marker file per `agent_id` under the parent's marker directory, so the parent's checkpoint write can be held until every subagent returns (drain gate). Ships for the first time in this release; the marker path layout is INTERNAL (governed by State Files, not this table) and may change in a minor version. |
 | `PostToolUse` (`tool-timing.sh`, matcher `""`) | After every tool call | **Opt-in** (`BATON_TIMING=1`). Emits `tool_call` envelope with SDK `duration_ms` + self-measured `hook_overhead_ms`. Off-path is a no-op (env check then drain stdin). |
 | `PostToolUse` (`outcome-proxy-code-execution.sh`, matcher `Bash`) | After Bash tool calls | **Opt-in** outcome-quality proxy. Emits `outcome_proxy` events; privacy contract (no command text) applies. Behavior may change in minor versions. |
 | `UserPromptSubmit` (`outcome-proxy-retry-density.sh`) | Every user prompt | **Opt-in** outcome-quality proxy (retry-density signal). Emits `outcome_proxy` events; never captures prompt text. Behavior may change in minor versions. |
 | `SessionEnd` (`cleanup-on-exit.sh`) | Session close | Per-session housekeeping; no envelope emitted. Behavior may change in minor versions. |
+| `Stop` (`stop-relaunch-trigger.sh`) | When Claude finishes its final message for a turn | Arms the fresh-relaunch auto-continue driver: when a checkpoint was written during the turn AND the session runs under a `baton-run` supervisor, spawns a detached helper that ends the session so a fresh one can relaunch (`BATON_AUTO_CONTINUE_MODE=relaunch`). Ships to every user; every precondition miss is a silent no-op and the hook always exits 0, because a non-zero Stop hook would block the stop. Behavior may change in minor versions. |
 
 **Commitment:** Observability hooks may be added, removed, or restructured in minor versions provided (a) `schema_version` in `hook-events.jsonl` is incremented on any breaking event change, and (b) the privacy contract (no prompt/completion text, mode 0600, local-only) is never weakened. Behavior changes that *strengthen* privacy or reduce telemetry volume ship as minor versions; changes that broaden capture require a major bump.
 
@@ -80,7 +82,7 @@ Schemas are documented in [`docs/context-baton.md`](context-baton.md#state-layou
 
 - The set of documented fields and their types.
 - The atomicity guarantee on writes to `workstreams/<name>.json` (flock-protected, write-rename).
-- The filename conventions: `<name>.json` for workstreams (alphanumeric + `-` + `_`), `<hash>.json` for terminals (md5 of `USER:<terminal-id-source>`).
+- The filename conventions: `<name>.json` for workstreams (alphanumeric + `-` + `_`), `<hash>.json` for terminals - the md5 of `USER:<CLAUDE_TERMINAL_ID>` when `CLAUDE_TERMINAL_ID` is set, otherwise the md5 of `USER:<tty>:<boot-id>`, where `<boot-id>` is the kernel boot identifier (the empty string on platforms that do not expose one).
 
 **Commitment:** Additive field changes are allowed within a minor version. Renames or removals require a major bump with a documented migration path in the CHANGELOG. Consumers reading state files should ignore unknown fields.
 
@@ -111,7 +113,7 @@ The following are internal and may change without notice in any release:
 
 ## Extension Points (None Beyond Hooks)
 
-> Pass the Baton does not have a plugin system, a hook-extension API, or a third-party storage backend. The Claude Code hook architecture is the extension surface. The four core-flow hooks (semver-protected) plus six observability hooks (additive contract) plus documented `BATON_*` environment variables plus the `hook-events.jsonl` schema are the entirety of the public API surface - there is no second extension mechanism. If you need behavior beyond what env vars provide, fork - the install script is one file, the runtime is ~1.7K LoC of bash, and PRs that generalize cleanly are welcome.
+> Pass the Baton does not have a plugin system, a hook-extension API, or a third-party storage backend. The Claude Code hook architecture is the extension surface. The four core-flow hooks (semver-protected) plus eight observability hooks (additive contract) plus documented `BATON_*` environment variables plus the `hook-events.jsonl` schema are the entirety of the public API surface - there is no second extension mechanism. If you need behavior beyond what env vars provide, fork - the install script is one file, the runtime is ~1.7K LoC of bash, and PRs that generalize cleanly are welcome.
 
 ## Kill-Switch Watch
 

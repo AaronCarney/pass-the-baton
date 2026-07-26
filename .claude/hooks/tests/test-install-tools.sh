@@ -140,6 +140,24 @@ run_cron_idempotent() {
 }
 run_cron_idempotent
 
+# Regression: install.sh step 7 invoked install-cron.sh with --dry-run, so the answers
+# it collects and exports ("Export so install-cron picks them up") reached a child that
+# by contract writes nothing. Installing produced no env file and no wrapper, and the
+# archive-dir answer died there. The installer's cron step must actually install.
+run_install_writes_cron_env() {
+  local d; d=$(mktemp -d)
+  mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" BATON_ARCHIVE_DIR="$d/archive" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "INSTALL-CRON: installer writes the cron env file" "[ -f '$d/.config/baton/env' ]"
+  assert "INSTALL-CRON: env file carries the archive-dir answer" \
+    "grep -qE 'BATON_ARCHIVE_DIR=.*$d/archive' '$d/.config/baton/env'"
+  # No wrapper assert here: run_cron_wrapper_created above already created it in the
+  # shared repo path, so asserting it exists again would pass without proving anything.
+  rm -rf "$d"
+}
+run_install_writes_cron_env
+
 run_cron_prints_crontab_line() {
   local d; d=$(mktemp -d)
   local out

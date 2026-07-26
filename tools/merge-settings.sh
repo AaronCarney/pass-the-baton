@@ -32,12 +32,14 @@ EVENTS=(
   UserPromptSubmit
   UserPromptSubmit
   Stop
+  SubagentStart
 )
 MATCHERS=(
   ""
   ""
   "Write|Edit|MultiEdit"
   "Bash"
+  ""
   ""
   ""
   ""
@@ -52,6 +54,7 @@ COMMANDS=(
   "bash $HOOKS_DIR/project-detect.sh"
   "bash $HOOKS_DIR/outcome-proxy-retry-density.sh"
   "bash $HOOKS_DIR/stop-relaunch-trigger.sh"
+  "bash $HOOKS_DIR/subagent-track-start.sh"
 )
 
 if [ -f "$TARGET" ] && [ -s "$TARGET" ]; then

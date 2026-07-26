@@ -319,8 +319,11 @@ printf 'baton: registered tool-timing hook (off by default; set BATON_TIMING=1 t
 unset _tt_settings _tt_prefix _tt_cmd
 # tool-timing hook register end
 
-# 7. Install cron wrapper.
-bash "$REPO_DIR/tools/install-cron.sh" --dry-run
+# 7. Install cron wrapper. A real run: it writes the env file (consuming the BATON_*
+# answers exported above) and the wrapper, then PRINTS the crontab line for the user to
+# paste. It never edits the crontab itself in any mode, so this is not a silent change
+# to the user's schedule. --dry-run here made the exported answers dead-end.
+bash "$REPO_DIR/tools/install-cron.sh"
 
 echo ""
 echo "=== Install complete ==="

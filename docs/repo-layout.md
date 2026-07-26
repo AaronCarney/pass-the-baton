@@ -15,6 +15,8 @@ The full annotated file tree. For the high-level directory-role map, see the [pr
     project-detect.sh            # UserPromptSubmit - workstream display_name detection
     outcome-proxy-code-execution.sh  # PostToolUse (Bash, opt-in) - outcome-quality proxy
     outcome-proxy-retry-density.sh   # UserPromptSubmit (opt-in) - retry-density proxy
+    stop-relaunch-trigger.sh     # Stop - relaunch driver
+    subagent-track-start.sh      # SubagentStart - active-subagent marker for the drain gate
     lib/
       envelope.sh                # sole writer of the structured telemetry log
                                  #   ($XDG_STATE_HOME/baton/hook-events.jsonl);
@@ -25,6 +27,7 @@ The full annotated file tree. For the high-level directory-role map, see the [pr
                                  #   different file). See docs/context-baton.md.
       otel_mapping.sh            # OTel field-name map; sourced by tools/export.sh --otel
       workstream-lib.sh          # shared workstream helpers
+      drain-gate.sh              # subagent drain gate: active-marker dir + hung-subagent timeout
       lints.sh                   # progress-file lint pipeline (V1/V7/V8)
       outcome-proxies.sh         # outcome-quality proxy helpers
       project-context.sh         # project-context.json role-mapping
@@ -37,7 +40,7 @@ The full annotated file tree. For the high-level directory-role map, see the [pr
   skills/
     baton/                       # /baton config dashboard
     install-baton/          # install assistant
-  settings.json                  # repo-local hook wiring (cost + latency only)
+  settings.json                  # repo-local hook wiring (cost + latency + SubagentStart drain marker)
 lib/
   cost-models.sh                 # per-model pricing, cost_of_turn
   tokens.sh                      # byte→token estimator

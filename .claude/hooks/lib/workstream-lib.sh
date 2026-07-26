@@ -63,12 +63,28 @@ log_event() {
   chmod 0600 "$log_file" 2>/dev/null || true
 }
 
+# boot_id - kernel boot identifier, stable within a boot and different across one.
+# Used ONLY to salt the tty-derived term_hash tiers: the OS recycles tty device
+# names across reboots, so md5(user:tty) alone can collide a resumed session with
+# a stale terminals/<hash>.json from a previous boot. Env-overridable for tests.
+# Absent (non-Linux) degrades to the empty string, i.e. exactly today's behavior.
+boot_id() {
+  if [ -n "${_BATON_BOOT_ID+x}" ]; then
+    printf '%s' "$_BATON_BOOT_ID"
+    return 0
+  fi
+  cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\n' || true
+}
+
 # term_hash - stable per-terminal identifier with deterministic fallbacks.
 # Order: CLAUDE_TERMINAL_ID > $(tty) > parent shell's TTY (via $PPID).
+# The two tty tiers are salted with boot_id; the explicit tier is not.
 # Centralized so all hooks resolve identity identically.
 term_hash() {
   local source_val=""
   if [ -n "${CLAUDE_TERMINAL_ID:-}" ]; then
+    # Explicit id is stable by construction (baton-run.sh exports it); salting it
+    # would rekey those sessions across reboots for no benefit.
     source_val="$CLAUDE_TERMINAL_ID"
   else
     local t
@@ -79,6 +95,9 @@ term_hash() {
       # Last resort: parent shell's TTY
       source_val=$(ps -o tty= -p "$PPID" 2>/dev/null | tr -d ' ')
     fi
+    # tty device names are recycled across reboots - salt with the boot id so a
+    # reused tty cannot inherit a previous boot's workstream binding.
+    source_val="${source_val}:$(boot_id)"
   fi
   echo -n "${USER}:${source_val}" | md5sum | cut -d' ' -f1
 }

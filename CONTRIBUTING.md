@@ -28,7 +28,7 @@ See [`docs/public-api.md`](docs/public-api.md) for what's stable and what's inte
 
 ## Tests
 
-102 shell test suites under [`.claude/hooks/tests/`](.claude/hooks/tests/), over 1,700 hard asserts. CI runs the full set on push and PR via [`.github/workflows/baton-tests.yml`](.github/workflows/baton-tests.yml).
+149 shell test suites under [`.claude/hooks/tests/`](.claude/hooks/tests/), over 1,700 hard asserts. CI runs the full set on push and PR via [`.github/workflows/baton-tests.yml`](.github/workflows/baton-tests.yml).
 
 Run a single suite: `bash .claude/hooks/tests/<suite>.sh`. Run the full set locally: `for t in .claude/hooks/tests/test-*.sh; do bash "$t"; done`.
 

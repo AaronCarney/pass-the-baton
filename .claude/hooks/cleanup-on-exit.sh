@@ -66,6 +66,11 @@ rm -f "/tmp/baton-archive-${SESSION_ID}"
 rm -f "/tmp/baton-health-${SESSION_ID}"
 rm -f "/tmp/baton-warned-${SESSION_ID}"
 rm -f "/tmp/baton-nag-${SESSION_ID}"
+rm -f "/tmp/baton-manual-${SESSION_ID}"
+rm -f "/tmp/baton-consent-${SESSION_ID}"
+rm -f "/tmp/baton-unlock-${SESSION_ID}"
+rm -f "/tmp/baton-snooze-${SESSION_ID}"
+rm -rf "/tmp/baton-subagents-active-${SESSION_ID}"
 rm -f "$T_POINTER"
 
 # 3. Truncate debug log if > 100KB (shared across all terminals)

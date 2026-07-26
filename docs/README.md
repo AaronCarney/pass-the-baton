@@ -42,4 +42,6 @@ Flag-by-flag reference for `cost.sh`, `doctor.sh`, `baton-dashboard.sh`, and `pr
 - [**architecture.md**](architecture.md) - end-to-end data flow: hooks -> libs -> state -> tools.
 - **Repository layout** - full per-file annotated tree: [repo-layout.md](repo-layout.md).
 - **Design rationale, state schema, troubleshooting:** [context-baton.md](context-baton.md).
+- **Subagent drain gate** - how a checkpoint due mid-subagent holds the parent's write until every subagent returns: [context-baton.md § Subagent drain gate](context-baton.md#subagent-drain-gate).
+- **Internal `/tmp` session-scratch markers** (debugging aid, not a stability contract): [context-baton.md § Session-scratch /tmp markers](context-baton.md#session-scratch-tmp-markers-internal).
 - **Contributing** (scope, style, the test-as-contract rule): [CONTRIBUTING.md](../CONTRIBUTING.md).

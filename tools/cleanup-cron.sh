@@ -93,6 +93,10 @@ SWEEP_PATTERNS=(
   'baton-relaunch-*'
   'baton-pending-*'
   'baton-archive-*'
+  'baton-manual-*'
+  'baton-consent-*'
+  'baton-unlock-*'
+  'baton-snooze-*'
   'claude-subagent-checkpoint-*'
   'claude-session-tracking-*'
   'claude-parent-sid-*'
@@ -104,6 +108,12 @@ for pat in "${SWEEP_PATTERNS[@]}"; do
   N=$(find /tmp -maxdepth 1 -name "$pat" -mmin +"$TMP_TTL_MIN" -delete -print 2>/dev/null | wc -l)
   CLEANED=$((CLEANED + N))
 done
+# Active-subagent marker dirs (drain gate). Directories, so rm -rf, not -delete.
+DIRN=0
+while IFS= read -r -d '' d; do
+  rm -rf "$d" 2>/dev/null && DIRN=$((DIRN+1))
+done < <(find /tmp -maxdepth 1 -type d -name 'baton-subagents-active-*' -mmin +"$TMP_TTL_MIN" -print0 2>/dev/null)
+CLEANED=$((CLEANED + DIRN))
 log "Block 1: cleaned $CLEANED stale /tmp files (TTL=${TMP_TTL_MIN}m)"
 
 # === Block 2: archive per-session tracking files ===

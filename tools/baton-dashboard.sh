@@ -3,6 +3,8 @@
 # Usage:
 #   baton-dashboard.sh show
 #   baton-dashboard.sh set key=value [key2=value2 ...]
+#   baton-dashboard.sh tui        (interactive tabbed dashboard; falls back to
+#                                  show with no TTY)
 #   baton-dashboard.sh  (no args: same as `show`)
 
 set -u
@@ -47,6 +49,7 @@ _show() {
   printf '  %-32s %-40s %s\n' 'BATON_WORKSTREAM_TTL_DAYS:' "$(( $(workstream_ttl_seconds) / 86400 ))" "$(_src BATON_WORKSTREAM_TTL_DAYS)"
   printf '  %-32s %-40s %s\n' 'BATON_TRACKING_TTL_DAYS:'   "$(( $(tracking_ttl_seconds) / 86400 ))" "$(_src BATON_TRACKING_TTL_DAYS)"
   printf '  %-32s %-40s %s\n' 'BATON_TMP_TTL_HOURS:'       "$(( $(tmp_ttl_minutes) / 60 ))" "$(_src BATON_TMP_TTL_HOURS)"
+  printf '  %-32s %-40s %s\n' 'BATON_SWEEP_INTERVAL_HOURS:' "$(sweep_interval_hours)" "$(_src BATON_SWEEP_INTERVAL_HOURS)"
   printf '\n[Opt-ins]\n'
   printf '  %-32s %-40s %s\n' 'BATON_COLLECT:'            "$(_cfg::get BATON_COLLECT 0)" "$(_src BATON_COLLECT)"
   printf '  %-32s %-40s %s\n' 'BATON_TIMING:'             "$(_cfg::get BATON_TIMING 0)" "$(_src BATON_TIMING)"
@@ -188,7 +191,7 @@ _set_one() {
       # free-form path; allow any non-empty string
       [ -n "$value" ] || { echo "Error: $key cannot be empty" >&2; return 1; }
       ;;
-    BATON_WORKSTREAM_TTL_DAYS|BATON_TRACKING_TTL_DAYS|BATON_TMP_TTL_HOURS)
+    BATON_WORKSTREAM_TTL_DAYS|BATON_TRACKING_TTL_DAYS|BATON_TMP_TTL_HOURS|BATON_SWEEP_INTERVAL_HOURS)
       [[ "$value" =~ ^[0-9]+$ ]] || { echo "Error: $key must be a non-negative integer" >&2; return 1; }
       ;;
     max_terminals_per_workstream)
@@ -241,7 +244,7 @@ _set_one() {
 Error: unknown key. Valid keys:
   [Existing]   template, threshold_pct, display_name, templates_dir, project_context_file, max_terminals_per_workstream, auto_continue_mode, launch_alias
   [Paths]      BATON_DIR, BATON_PROGRESS_DIR, BATON_ARCHIVE_DIR, BATON_PROJECT_DIR
-  [TTLs]       BATON_WORKSTREAM_TTL_DAYS, BATON_TRACKING_TTL_DAYS, BATON_TMP_TTL_HOURS
+  [TTLs]       BATON_WORKSTREAM_TTL_DAYS, BATON_TRACKING_TTL_DAYS, BATON_TMP_TTL_HOURS, BATON_SWEEP_INTERVAL_HOURS
   [Opt-ins]    BATON_COLLECT, BATON_TIMING, BATON_OUTCOME_PROXIES, BATON_PREWARM, BATON_EVENT_LOG_DISABLE
   [Event-log]  BATON_EVENT_LOG, BATON_OTEL_EXPORT
   [Cost-model] BATON_COST_MODEL, BATON_SUMMARY_MODEL, BATON_TOKEN_RATIOS
@@ -260,6 +263,9 @@ EOF
   esac
 }
 
+# Only dispatch when executed directly; sourcing exposes _show/_set_one for tests.
+[ "${BASH_SOURCE[0]}" = "${0}" ] || return 0
+
 case "${1:-}" in
   show|"")
     _show
@@ -270,8 +276,12 @@ case "${1:-}" in
     for kv in "$@"; do _set_one "$kv" || exit 1; done
     _show
     ;;
+  tui|interactive|dashboard)
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/baton-dashboard-tui.sh"
+    _tui_main
+    ;;
   *)
-    echo "Usage: $0 [show|set key=value ...]" >&2
+    echo "Usage: $0 [show|set key=value ...|tui]" >&2
     exit 1
     ;;
 esac

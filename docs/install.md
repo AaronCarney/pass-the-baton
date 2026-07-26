@@ -4,7 +4,7 @@
 
 - **Linux** (Ubuntu, Debian, Fedora, Arch) - primary target.
 - **WSL2** - supported (mirrored networking; statusline shim writes to /tmp inside WSL).
-- **macOS / BSD** - *deferred.* `project-detect.sh` uses GNU `grep -P \K`; `cleanup-cron.sh` uses GNU `find -mmin`. Both have BSD equivalents but are not currently tested.
+- **macOS / BSD** - *deferred.* `project-detect.sh` uses GNU `grep -P \K`; `cleanup-cron.sh` uses GNU `find -mmin`; `drain-gate.sh` uses GNU `find -printf`. These have BSD equivalents but are not currently tested.
 
 ## Dependencies
 
@@ -16,7 +16,7 @@
 | `jq` | 1.6 | all state-file mutations |
 | `flock` | util-linux 2.30 | workstream-record write serialization |
 | `grep` | GNU 3 | `\K` PCRE in project-detect |
-| `find` | GNU 4.7 | `-mmin`/`-newer` semantics in cleanup-cron |
+| `find` | GNU 4.7 | `-mmin`/`-newer` semantics in cleanup-cron; `-printf '%T@'` in drain-gate |
 | `md5sum` | coreutils 8 | terminal-hash derivation |
 
 ### Optional (analysis tools)
@@ -64,7 +64,7 @@ bash tools/install.sh --target /path/to/your/project
 The installer:
 - validates dependencies (jq, flock, GNU grep/find, md5sum, bash 4.4+),
 - walks you through 6 first-time-setup prompts (interactive mode - default when stdin is a TTY),
-- merges 11 hook commands into `~/.claude/settings.json` (idempotent - re-run is a no-op): eight via `merge-settings.sh` - SessionStart, PreToolUse, PostToolUse (checkpoint-write + the opt-in `outcome-proxy-code-execution`), SessionEnd, UserPromptSubmit (project-detect + the opt-in `outcome-proxy-retry-density`), Stop (`stop-relaunch-trigger`, the relaunch driver); plus three inline jq blocks - PostToolBatch (`post-tool-batch`, cost telemetry), PostToolUse:`tool-timing`, and SubagentStop (`post-subagent-cost`). The two outcome-proxy hooks no-op unless `BATON_OUTCOME_PROXIES=1`,
+- merges 12 hook commands into `~/.claude/settings.json` (idempotent - re-run is a no-op): nine via `merge-settings.sh` - SessionStart, PreToolUse, PostToolUse (checkpoint-write + the opt-in `outcome-proxy-code-execution`), SessionEnd, UserPromptSubmit (project-detect + the opt-in `outcome-proxy-retry-density`), Stop (`stop-relaunch-trigger`, the relaunch driver), SubagentStart (`subagent-track-start`, the drain gate); plus three inline jq blocks - PostToolBatch (`post-tool-batch`, cost telemetry), PostToolUse:`tool-timing`, and SubagentStop (`post-subagent-cost`). The two outcome-proxy hooks no-op unless `BATON_OUTCOME_PROXIES=1`,
 - copies the statusline shim to `~/.claude/baton-pct.sh`,
 - appends `.baton/` to the target project's `.gitignore`,
 - prints an optional crontab line (the cleanup sweep already runs automatically on session start; the crontab is only a fallback for machines where Claude Code sessions are infrequent).
@@ -202,7 +202,7 @@ Install a `baton` launch alias for auto-continue? (opt-in, default no)
 bash tools/verify-install.sh
 ```
 
-Checks: each of the 5 core hook events (SessionStart, PreToolUse, PostToolUse, SessionEnd, UserPromptSubmit) has a checkpoint hook registered, statusline tick file appears within ~1s, full test suite passes (141 test scripts), idempotency re-run is a no-op.
+Checks: each of the 5 core hook events (SessionStart, PreToolUse, PostToolUse, SessionEnd, UserPromptSubmit) has a checkpoint hook registered, statusline tick file appears within ~1s, full test suite passes (149 test scripts), idempotency re-run is a no-op.
 
 `--pre-commit-only` runs the S2 smoke (E1-only path) for fast pre-commit gating.
 

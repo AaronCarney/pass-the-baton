@@ -44,12 +44,12 @@ Cited: `lib/config.sh:10-40`.
 ### `hooks/hooks.json`
 
 - The plugin's hook-wiring manifest.
-- Points the 8 hook events (`PreToolUse`, `PostToolUse`, `PostToolBatch`, `SubagentStop`, `Stop`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`) at `${CLAUDE_PLUGIN_ROOT}/.claude/hooks/*`.
+- Points the 9 hook events (`PreToolUse`, `PostToolUse`, `PostToolBatch`, `SubagentStart`, `SubagentStop`, `Stop`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`) at `${CLAUDE_PLUGIN_ROOT}/.claude/hooks/*`.
 
 ### `.claude/settings.json`
 
 - Repo-local hook wiring for **this** repo's own dev sessions.
-- Wires only the cost/latency/subagent hooks: `PostToolBatch`, `PostToolUse`, `SubagentStop`, `UserPromptSubmit`. It does **not** wire the core continuity hooks - those ship via the plugin (`hooks/hooks.json`).
+- Wires only the cost/latency/subagent hooks: `PostToolBatch`, `PostToolUse`, `SubagentStart`, `SubagentStop`, `UserPromptSubmit`. It does **not** wire the core continuity hooks - those ship via the plugin (`hooks/hooks.json`).
 
 ### `.baton/audit-metadata.json`
 
@@ -106,6 +106,23 @@ Run `/pass-the-baton:renew` to fire a checkpoint immediately, before the context
 It composes with whichever driver is active (tmux or relaunch): after the save, the same driver continues the session.
 
 Manual smoke: after invoking `/pass-the-baton:renew`, the flag file `/tmp/baton-force-checkpoint-$CLAUDE_CODE_SESSION_ID` exists until your next action consumes it.
+
+## Consent escapes (/pass-the-baton:off, /pass-the-baton:snooze)
+
+Two per-session escapes for when a checkpoint is in your way.
+
+`/pass-the-baton:off` disables checkpointing for the rest of this session. It
+arms `/tmp/baton-unlock-$CLAUDE_CODE_SESSION_ID`; the checkpoint hook no-ops
+while that flag exists. Anything already owed stays unsaved.
+
+`/pass-the-baton:snooze [minutes]` defers checkpointing until an expiry epoch
+(default 10 minutes, maximum `BATON_SNOOZE_MAX_MIN`, default 120). It arms
+`/tmp/baton-snooze-$CLAUDE_CODE_SESSION_ID` whose contents are the absolute
+expiry; the hook resumes on its own once that passes.
+
+Both defer the reminder, not the obligation. If a checkpoint is already owed when
+you snooze, the pending flag stays set and you are warned on stderr - a session
+that compacts inside the window loses the handoff.
 
 ## See also
 

@@ -43,15 +43,19 @@ out=$(run_hook "$sid")
 ok "re-assert fires below threshold while owed" "printf '%s' \"\$out\" | grep -q 'CHECKPOINT STILL PENDING'"
 clean "$sid"
 
-# 3. Escalates to a hard deny at the nag limit.
+# 3. Automated path never hard-denies, even with a stale counter at the old limit.
+#    Pre-E1 this asserted a deny once the nag counter reached the limit. E1 removed
+#    that escalation on the automated (no baton-manual marker) path: it emits the
+#    soft write instruction instead and does not advance the stale counter.
 sid="nag-hard-$$"; clean "$sid"
 echo 50 > "/tmp/claude-context-pct-${sid}"
 touch "/tmp/claude-context-triggered-${sid}"
 touch "/tmp/baton-pending-${sid}"
 echo 2 > "/tmp/baton-nag-${sid}"
 out=$(run_hook "$sid")
-ok "hard deny at nag limit" "printf '%s' \"\$out\" | grep -q 'CHECKPOINT STILL UNSAVED'"
-ok "hard deny is a deny decision" "printf '%s' \"\$out\" | grep -q deny"
+ok "automated path emits the soft write instruction at the old limit" "printf '%s' \"\$out\" | grep -q 'CHECKPOINT STILL PENDING'"
+ok "automated path does not deny at the old limit" "! printf '%s' \"\$out\" | grep -q deny"
+ok "automated path does not advance the stale counter" "[ \"$(cat /tmp/baton-nag-${sid} 2>/dev/null)\" = 2 ]"
 clean "$sid"
 
 # 4. Fresh below-threshold call with nothing owed: no trigger, no pending flag.
@@ -93,6 +97,70 @@ ok "progress-file Write is not denied" "! printf '%s' \"\$out\" | grep -q deny"
 ok "progress-file Write emits no nag text" "! printf '%s' \"\$out\" | grep -q 'CHECKPOINT STILL'"
 ok "progress-file Write does not increment nag" "[ \"$(cat /tmp/baton-nag-${sid} 2>/dev/null)\" = 5 ]"
 clean "$sid"
+
+# 7. Reading the scaffold is exempt from the nag even past the hard-deny limit.
+#    (The checkpoint workflow mandates this read; blocking it deadlocks the save.)
+sid="nag-read-scaffold-$$"; clean "$sid"
+echo 50 > "/tmp/claude-context-pct-${sid}"
+touch "/tmp/claude-context-triggered-${sid}"
+touch "/tmp/baton-pending-${sid}"
+echo 5 > "/tmp/baton-nag-${sid}"   # already past the hard-deny limit
+out=$(run_hook "$sid" Read "$TMP/progress-testws-abc123.scaffold.md")
+ok "scaffold Read is not denied" "! printf '%s' \"\$out\" | grep -q deny"
+ok "scaffold Read does not increment nag" "[ \"$(cat /tmp/baton-nag-${sid} 2>/dev/null)\" = 5 ]"
+clean "$sid"
+
+# 8. Reading the active template is exempt from the nag even past the hard-deny limit.
+sid="nag-read-tpl-$$"; clean "$sid"
+mkdir -p "$TMP/share/templates"
+echo '# stub free' > "$TMP/share/templates/free.md"   # makes the resolver land here (precedence 3)
+echo 50 > "/tmp/claude-context-pct-${sid}"
+touch "/tmp/claude-context-triggered-${sid}"
+touch "/tmp/baton-pending-${sid}"
+echo 5 > "/tmp/baton-nag-${sid}"
+out=$(run_hook "$sid" Read "$TMP/share/templates/free.md")
+ok "template Read is not denied" "! printf '%s' \"\$out\" | grep -q deny"
+ok "template Read does not increment nag" "[ \"$(cat /tmp/baton-nag-${sid} 2>/dev/null)\" = 5 ]"
+clean "$sid"
+
+# 9. Automated path: an unrelated Read past the old limit is NOT denied either.
+#    Pre-E1 the unrelated Read fell through to the generic hard deny. E1's automated
+#    branch sits just above that deny and short-circuits it with the soft write
+#    instruction. The scaffold/template Read exemptions (cases 7, 8) still exit ABOVE
+#    the E1 branch, so this is not a blanket Read allow.
+sid="nag-read-other-$$"; clean "$sid"
+echo 50 > "/tmp/claude-context-pct-${sid}"
+touch "/tmp/claude-context-triggered-${sid}"
+touch "/tmp/baton-pending-${sid}"
+echo 5 > "/tmp/baton-nag-${sid}"
+out=$(run_hook "$sid" Read "$TMP/some-other-file.md")
+ok "unrelated Read past the limit is not denied on the automated path" "! printf '%s' \"\$out\" | grep -q deny"
+ok "unrelated Read past the limit gets the soft write instruction" "printf '%s' \"\$out\" | grep -q 'CHECKPOINT STILL PENDING'"
+clean "$sid"
+
+# E3: the nag is IMPOSSIBLE before the write, not merely dodged by enumerated cases.
+# Drives the MANUAL path (baton-manual marker present), which is the only path that
+# ever counted or escalated. A stale counter well past the old limit is seeded to prove
+# the escalation is gone structurally, not just unreached.
+sid="e3-manual-$$"; clean "$sid"; rm -f "/tmp/baton-manual-${sid}"
+echo 50 > "/tmp/claude-context-pct-${sid}"
+touch "/tmp/claude-context-triggered-${sid}" "/tmp/baton-pending-${sid}" \
+      "/tmp/baton-manual-${sid}"
+echo 99 > "/tmp/baton-nag-${sid}"   # far past the retired limit
+out=$(run_hook "$sid" Bash)
+ok "E3 manual path never denies while owed"        "! printf '%s' \"\$out\" | grep -q deny"
+ok "E3 manual path emits no permissionDecision"    "! printf '%s' \"\$out\" | grep -q permissionDecision"
+ok "E3 manual path still nudges"                   "printf '%s' \"\$out\" | grep -q 'CHECKPOINT STILL PENDING'"
+ok "E3 no counter is written"                      "[ \"\$(cat /tmp/baton-nag-${sid} 2>/dev/null)\" = 99 ]"
+
+# Repeat calls must not accumulate anything. Ten consecutive consequential calls,
+# every one of them clean: this is what 'impossible', rather than 'budgeted', means.
+_e3_denies=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  printf '%s' "$(run_hook "$sid" Bash)" | grep -q deny && _e3_denies=$((_e3_denies+1))
+done
+ok "E3 ten consecutive owed calls never escalate" "[ \"$_e3_denies\" = 0 ]"
+clean "$sid"; rm -f "/tmp/baton-manual-${sid}"
 
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ]

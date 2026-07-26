@@ -344,9 +344,11 @@ _row_has "$es_out" 'BATON_DIR' 'env-only by design' && PASS=$((PASS+1)) || { FAI
 _row_has "$es_out" 'BATON_PROJECT_DIR' 'env-only by design' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: BATON_PROJECT_DIR must show env-only-by-design tag' >&2; }
 # ES5: the stale env-only-CLIs claim is GONE.
 case "$es_out" in *'read env-only'*|*'query.sh'*) FAIL=$((FAIL+1)); echo 'FAIL: stale env-only-CLIs footnote still present' >&2;; *) PASS=$((PASS+1));; esac
-# ES6: no 'interactive' claim in the usage/help text.
-help_out=$(bash "$DASH" bogus-cmd 2>&1 || true); head_out=$(head -8 "$DASH")
-case "$head_out" in *interactive*) FAIL=$((FAIL+1)); echo 'FAIL: interactive claim still in usage comment' >&2;; *) PASS=$((PASS+1));; esac
+# ES6: the 'interactive' claim is now REAL - the usage documents a `tui` subcommand
+# and a matching dispatch case exists (was a stub aliased to show; now implemented).
+head_out=$(head -8 "$DASH")
+_acontains "$head_out" 'tui' 'usage documents tui subcommand'
+grep -q 'baton-dashboard-tui.sh' "$DASH" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: tui dispatch not wired' >&2; }
 
 # === E4: single-sourced threshold default + helper-driven TTL rows ===
 echo '{}' > "$CFG"
@@ -435,7 +437,7 @@ _donef="$TMP/done.flag"; : > "$_donef"
 (
   export PATH="$_shimdir:$PATH" NUDGE_REC BATON_AUTO_CONTINUE=1
   unset BATON_AUTO_CONTINUE_NUDGE
-  _AUTO_CONTINUE_POLL_INTERVAL=0.01 _AUTO_CONTINUE_POLL_MAX_SECONDS=2 \
+  _AUTO_CONTINUE_POLL_INTERVAL=0.01 _AUTO_CONTINUE_POLL_MAX_SECONDS=2 _AUTO_CONTINUE_NUDGE_SETTLE=0 \
     bash "$REPO/tools/baton-auto-continue.sh" nudge-exec-$$ "$_donef" '%9' >/dev/null 2>&1
 )
 grep -qx go "$NUDGE_REC" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: injector must send config.json NUDGE (go) verbatim to tmux' >&2; }
@@ -454,6 +456,40 @@ case "$hon" in *"/tmp/leak-dir"*) FAIL=$((FAIL+1)); echo 'FAIL: show must not su
 jq '.BATON_PROJECT_DIR="/tmp/leak-projdir"' "$XDG_CONFIG_HOME/baton/config.json" > "$TMP/c.json" && mv "$TMP/c.json" "$XDG_CONFIG_HOME/baton/config.json"
 honp=$(unset BATON_PROJECT_DIR; bash "$DASH" show)
 case "$honp" in *"/tmp/leak-projdir"*) FAIL=$((FAIL+1)); echo 'FAIL: show must not surface config.json BATON_PROJECT_DIR' >&2;; *) PASS=$((PASS+1));; esac
+
+# === Interactive TUI (baton-dashboard-tui.sh) ===
+TUI="$REPO/tools/baton-dashboard-tui.sh"
+
+# T1: `tui` with no TTY (piped stdin) falls back to show output.
+tui_fb=$(bash "$DASH" tui < /dev/null 2>&1)
+_acontains "$tui_fb" 'baton config' 'tui falls back to show without a TTY'
+
+# Load the render functions in-process (dashboard is source-safe).
+( source "$DASH"; source "$TUI"; _TUI_DASH_DIR="$REPO/tools"
+
+  # T2: frame renders all four tab labels and the active-tab marker.
+  fr=$(_tui_render_frame 0 0)
+  case "$fr" in *Status*Config*History*Workstreams*) : ;; *) echo 'FAIL: frame missing tabs' >&2; exit 3;; esac
+  case "$fr" in *'*[1]Status*'*) : ;; *) echo 'FAIL: active-tab marker missing' >&2; exit 3;; esac
+
+  # T3: config pane excludes the 3 read-only rows (BATON_DIR, BATON_PROJECT_DIR, template_version).
+  n=$(_tui_cfg_count)
+  [ "$n" = 28 ] || { echo "FAIL: expected 28 editable keys, got $n" >&2; exit 3; }
+  rows=$(_tui_config_rows | cut -f1)
+  case "$rows" in *BATON_DIR*|*template_version*) echo 'FAIL: read-only key leaked into editable rows' >&2; exit 3;; esac
+  [ "$(_tui_cfg_key_at 0)" = template ] || { echo 'FAIL: key@0 != template' >&2; exit 3; }
+
+  # T4: an unset value renders its tag in the tag column, not the value column.
+  cfg=$(_tui_render_config 0)
+  case "$cfg" in *'display_name  '*'[default]'*) : ;; *) echo 'FAIL: empty-value row misrendered' >&2; exit 3;; esac
+) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+
+# T5: unsupported subcommand still errs and names tui in usage.
+set +e
+u=$(bash "$DASH" bogus 2>&1); rc=$?
+set -e
+{ [ "$rc" != 0 ] && case "$u" in *tui*) true;; *) false;; esac; } \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo 'FAIL: bogus subcommand usage must mention tui' >&2; }
 
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ]

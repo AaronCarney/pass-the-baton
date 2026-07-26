@@ -1837,6 +1837,66 @@ run_e1_switch_survives_ss() {
 }
 run_e1_switch_survives_ss
 
+# --- term_hash boot-id hardening ---
+# Explicit CLAUDE_TERMINAL_ID is stable by construction: boot id must NOT enter it.
+TH_EXPLICIT_A=$(CLAUDE_TERMINAL_ID=fixed-id _BATON_BOOT_ID=boot-one bash -c \
+  'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+TH_EXPLICIT_B=$(CLAUDE_TERMINAL_ID=fixed-id _BATON_BOOT_ID=boot-two bash -c \
+  'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+assert "explicit CLAUDE_TERMINAL_ID ignores boot id" "[ '$TH_EXPLICIT_A' = '$TH_EXPLICIT_B' ]"
+
+# The tty-derived tiers MUST change when the boot id changes.
+TH_TTY_A=$(CLAUDE_TERMINAL_ID="" _BATON_BOOT_ID=boot-one bash -c \
+  'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+TH_TTY_B=$(CLAUDE_TERMINAL_ID="" _BATON_BOOT_ID=boot-two bash -c \
+  'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+assert "tty-derived hash changes across boot ids" "[ '$TH_TTY_A' != '$TH_TTY_B' ]"
+
+# Same boot id must be stable across calls.
+TH_TTY_C=$(CLAUDE_TERMINAL_ID="" _BATON_BOOT_ID=boot-one bash -c \
+  'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+assert "tty-derived hash stable within a boot" "[ '$TH_TTY_A' = '$TH_TTY_C' ]"
+
+# Missing boot id degrades to current behavior, never to an empty hash.
+# The empty _BATON_BOOT_ID= prefix is deliberate: it runs the subshell with the
+# var set to empty, which is the case under test.
+# shellcheck disable=SC1007
+TH_NOBOOT=$(CLAUDE_TERMINAL_ID="" _BATON_BOOT_ID= bash -c \
+  'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+assert "absent boot id still yields a hash" "[ -n '$TH_NOBOOT' ] && [ ${#TH_NOBOOT} -eq 32 ]"
+
+# The PRODUCTION branch: with no override, boot_id must read a value that is
+# stable across processes. A per-process value passes every assertion above and
+# still breaks the session-start -> subagent-track-start handoff (session-start.sh
+# writes /tmp/claude-parent-sid-<TH>, subagent-track-start.sh reads it; a
+# per-process boot id makes writer and reader disagree, PARENT_SID is empty,
+# drain::mark_start never fires and drain::count is always 0). _BATON_BOOT_ID is
+# explicitly UNSET (not empty) because ${VAR+x} distinguishes the two. This
+# assertion PASSES against the UNFIXED lib too - nothing reads a boot id yet, so
+# the hash is trivially stable across processes - so this assertion does not
+# itself add to Step 3's expected-new-failure count.
+TH_PROD_A=$(CLAUDE_TERMINAL_ID="" bash -c 'unset _BATON_BOOT_ID; source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+TH_PROD_B=$(CLAUDE_TERMINAL_ID="" bash -c 'unset _BATON_BOOT_ID; source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash')
+assert "boot id is stable across processes without an override" "[ '$TH_PROD_A' = '$TH_PROD_B' ] && [ ${#TH_PROD_A} -eq 32 ]"
+
+# The production /proc read must mix in a NON-EMPTY value: TH_PROD (real boot id)
+# must differ from TH_NOBOOT (explicit empty override). This is the ONLY assertion
+# that fails on an empty-production mutant - a /proc path typo or a non-Linux host
+# where boot_id() returns "" - which passes all five assertions above because an
+# all-empty salt is trivially stable across processes. Guard on the discriminator
+# existing so non-Linux hosts skip rather than false-fail.
+if [ -r /proc/sys/kernel/random/boot_id ]; then
+  assert "production boot id mixes a non-empty value into the tty hash" "[ '$TH_PROD_A' != '$TH_NOBOOT' ]"
+fi
+
+# term_hash_source must report the raw tier, not the salted hash input. Nothing
+# else pins this: test-workstream-hooks.sh:228 ([ -n "$src" ]) and :230
+# ([ "$src" != "$CLAUDE_TERMINAL_ID" ]) both stay green if a boot id were
+# appended, and Step 9b of task 6 publishes a per-tier formula that only holds
+# while term_hash_source stays unsalted.
+TS_SRC=$(CLAUDE_TERMINAL_ID="" _BATON_BOOT_ID=boot-marker bash -c 'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash_source')
+assert "term_hash_source reports the tier, not the salted input" "case '$TS_SRC' in *boot-marker*) false ;; *) true ;; esac"
+
 echo
 echo "====================================="
 echo "Results: $PASS passed, $FAIL failed"

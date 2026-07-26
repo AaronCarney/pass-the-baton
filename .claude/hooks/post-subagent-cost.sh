@@ -29,6 +29,20 @@ agent_transcript_path=$(printf '%s' "$payload" | jq -r '.agent_transcript_path /
 agent_id=$(printf '%s' "$payload" | jq -r '.agent_id // ""')
 agent_type=$(printf '%s' "$payload" | jq -r '.agent_type // ""')
 
+# --- drain: clear this subagent's active marker (runs even if no transcript) ---
+# Attribute to the parent via the same term_hash -> parent-sid map SubagentStart used.
+if [ -n "$agent_id" ]; then
+  # shellcheck source=lib/drain-gate.sh
+  source "$HOOKS_DIR/lib/drain-gate.sh" 2>/dev/null || true
+  if declare -F term_hash >/dev/null 2>&1 && declare -F drain::mark_stop >/dev/null 2>&1; then
+    _pt_th=$(term_hash 2>/dev/null || echo "")
+    if [ -n "$_pt_th" ]; then
+      _pt_psid=$(cat "/tmp/claude-parent-sid-${_pt_th}" 2>/dev/null || echo "")
+      [ -n "$_pt_psid" ] && drain::mark_stop "$_pt_psid" "$agent_id" || true
+    fi
+  fi
+fi
+
 # Best-effort: if no sub-agent transcript, don't block the turn. NO fallback to
 # transcript_path - that is the parent session and would re-leak parent usage.
 [ -z "$agent_transcript_path" ] && exit 0

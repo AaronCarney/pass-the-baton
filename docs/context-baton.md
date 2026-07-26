@@ -55,6 +55,28 @@ workstream a given session belongs to.
    binding is re-established automatically (session_id reacquisition). If the
    workstream cannot be reacquired, a fresh workstream is minted.
 
+### While a checkpoint is owed but not yet written
+
+Between step 2 (the trigger fires and sets pending) and step 3 (the progress
+file lands), the checkpoint is **owed**. In that window each further tool call is
+met with a reminder to stop and write the progress file - and the reminder never
+gates. The reminder is a reminder, not a budget: there is no counter, no attempt
+limit, and no escalation to a deny, on either the automated (threshold-fired) or
+the manual (`/pass-the-baton:renew`) path.
+
+Two other mechanisms can still hold a tool call. Neither belongs to the reminder:
+
+- The **drain gate** acts *inside* the owed window, before the write: it holds
+  the parent's consequential tool calls - the progress write itself included -
+  while subagents are still in flight, so nothing they are computing is lost from
+  the checkpoint (read-only tools stay open; see the Subagent drain gate section
+  below). Nothing outside the drain gate can hold a call before the progress file
+  lands - every hold reachable in this window belongs to it, including the
+  fail-closed denies it raises when its own libraries are missing. All of them
+  exist to protect what goes into the checkpoint, not to enforce the reminder.
+- The **DONE guard** acts *after* the window closes: it blocks every tool call
+  once the write has landed, until you `/clear` (step 4).
+
 ## Progress File Format
 
 Progress files are rendered from a user-selectable **template** at `share/templates/<name>.md`. Three templates ship with Pass the Baton:
@@ -130,6 +152,31 @@ the tty / parent-shell tty fallback). The filename `terminals/<term_hash>.json`
 is the **md5 hash** of `USER:<source>`, computed by
 `lib/workstream-lib.sh::term_hash`.
 
+### Session-scratch `/tmp` markers (internal)
+
+These paths are **internal implementation detail**, listed here as a debugging
+aid only. They are **not** a stability contract - external tooling must not
+depend on their names, layout, or lifecycle, all of which may change without
+notice.
+
+- `/tmp/baton-subagents-active-<parent_sid>/<agent_id>` - one file per in-flight
+  subagent; the directory listing is the active count. Written at SubagentStart,
+  removed at SubagentStop, whole directory reaped by TTL sweep once the directory
+  itself has been idle.
+- `/tmp/baton-manual-<sid>` - marks the owed checkpoint as manually armed (via
+  `/pass-the-baton:renew`). Created by `context-checkpoint.sh` when it consumes
+  the force flag, removed by `checkpoint-write-trigger.sh` after a successful
+  manual save.
+- `/tmp/baton-consent-<sid>` - a manual checkpoint has been written and the user
+  has not yet answered whether to keep working or clear. Created by
+  `checkpoint-write-trigger.sh` on the manual path in place of the DONE latch,
+  consumed by `tools/baton-consent.sh`. Answering `keep` also clears
+  `/tmp/claude-context-triggered-<sid>` so the threshold re-arms; `clear` latches
+  `/tmp/baton-done-<sid>` instead.
+- `/tmp/baton-unlock-<sid>` - present means checkpointing is off for this session.
+- `/tmp/baton-snooze-<sid>` - contents are an absolute expiry epoch;
+  checkpointing resumes once it passes.
+
 ## Three Execution Modes
 
 | Behavior            | Interactive (default)              | Subagent (`agent_id` in hook input)            | Autonomous (`AGENT_SESSION_ID` set) |
@@ -137,7 +184,7 @@ is the **md5 hash** of `USER:<source>`, computed by
 | Checkpoint trigger  | 20% → inject save workflow          | Reads parent's PCT via `term_hash` → "wrap up" | No-op (SDK wrapper handles)         |
 | Save protocol       | Full (progress file → cleanup)      | None - parent runs after subagent returns      | SDK wrapper handles                 |
 | Progress injection  | SessionStart auto-injects directive | N/A                                             | SDK wrapper passes initial context  |
-| Post-checkpoint     | Block all tool calls                | Block all tool calls (parent's DONE flag)      | N/A                                 |
+| Post-checkpoint     | Block all tool calls                | Not blocked - the parent holds its own write until the subagent returns (drain gate) | N/A                                 |
 
 ### Subagent bridging
 
@@ -148,10 +195,34 @@ read the parent's PCT directly. Bridge:
    `/tmp/claude-parent-sid-${TERM_HASH}` (keyed on `CLAUDE_TERMINAL_ID`).
 2. PreToolUse in the subagent detects `agent_id` → reads the parent's
    `session_id` from the terminal-keyed file → reads the parent's PCT.
-3. At 20%: a one-shot "wrap up" warning. If the parent's DONE flag is set:
-   hard block.
+3. At 20%: a one-shot "wrap up" warning. The subagent is never blocked - instead
+   the PARENT's checkpoint write is held until every subagent returns, so nothing
+   in flight is lost. See the drain gate section below.
 4. PostToolUse cleanup is skipped entirely for subagents - the parent runs the
    save protocol after the subagent returns.
+
+### Subagent drain gate
+
+When a checkpoint comes due while subagents are still running, writing the
+progress file immediately would capture a snapshot that is missing whatever they
+are still computing. So the checkpoint WRITE is held, not the subagents.
+
+While any subagent is in flight, the parent's consequential tool calls (including
+the progress write itself) are denied with `Checkpoint write held: N subagent(s)
+still running`. Read-only tools stay open so you can keep orienting. Once the last
+subagent returns, the write proceeds with their results folded in.
+
+If a subagent runs longer than `BATON_DRAIN_TIMEOUT_SECS` (default 360) you are
+asked whether to write the checkpoint without it. Allow discards anything that
+subagent has not yet returned; Deny keeps waiting.
+
+This requires the `SubagentStart` hook to be registered, and it ships through two
+channels. Plugin installs register it in `hooks/hooks.json` - check with
+`jq -e '.hooks.SubagentStart' hooks/hooks.json`. Installer (`tools/install.sh`)
+installs register it through `tools/merge-settings.sh` into
+`~/.claude/settings.json`; if the check above comes back empty after upgrading,
+re-run `tools/install.sh` to pick up the new wiring. Until it is registered in the
+channel your install uses, the gate silently does nothing.
 
 ## Switching Workstreams
 
@@ -220,6 +291,8 @@ checkpoint or a resume.
 | `BATON_PROJECT_DIR` | `$PWD` at install time | Project root for cron (cron has no `$PWD`). |
 | `BATON_PCT_THRESHOLD` | `20` | Percent context-fill trigger. Resolved **env var > `config.json` `threshold_pct` > default 20** by `workstream-lib.sh::checkpoint_threshold`, then bounds-checked: an integer in **1-99** is honored, anything else falls back to 20. Both the gate (`context-checkpoint.sh:66,158`) and the telemetry `threshold` field read through that one function, so changing this var (or `threshold_pct` in config) moves the actual trigger. |
 | `BATON_MAX_TERMINALS_PER_WORKSTREAM` | `0` | Opt-in co-tenancy cap: max terminals that may auto-join one workstream. `0` = unlimited. Bare-mention auto-joins over the cap are hard-blocked; an explicit `WORKSTREAM=` over the cap soft-overrides with a warning. |
+| `BATON_DRAIN_TIMEOUT_SECS` | `360` | Seconds before an unfinished subagent is treated as hung and the drain offers to write the checkpoint without it. Measured from subagent start, so this is total elapsed runtime, not idle time - raise it above your longest realistic subagent. |
+| `BATON_SNOOZE_MAX_MIN` | `120` | Upper bound on `/pass-the-baton:snooze [minutes]`. Deferring longer is a decision to stop checkpointing; use `/pass-the-baton:off` for that. |
 | `BATON_WORKSTREAM_TTL_DAYS` | `30` | Days before a workstream record is archived. |
 | `BATON_TRACKING_TTL_DAYS` | `7` | Days before a per-session tracking pointer is reaped. |
 | `BATON_TMP_TTL_HOURS` | `24` | Age before `/tmp` stragglers are swept by the cleanup cron. |

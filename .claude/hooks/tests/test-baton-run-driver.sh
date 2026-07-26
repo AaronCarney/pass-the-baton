@@ -4,6 +4,11 @@ REPO="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 RUN="$REPO/tools/baton-run.sh"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
+# The "carries no supervisor signal" asserts prove the off/tmux drivers never SET this.
+# When the suite itself runs inside a baton-supervised terminal it INHERITS a real value,
+# so the fake claude records it and those asserts fail on a correct wrapper. Clear the
+# ambient value so the asserts grade the wrapper, not the terminal that launched them.
+unset BATON_RELAUNCH_SUPERVISOR BATON_RELAUNCH_REQ
 PASS=0; FAIL=0
 ok(){ if eval "$2"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: $1" >&2; fi; }
 
