@@ -6,7 +6,7 @@ This page covers:
 
 - [`tools/cost.sh`](#toolscostsh) - per-session cost breakdown from Claude Code transcripts
 - [`tools/doctor.sh`](#toolsdoctorsh) - environment health probe
-- [`tools/baton-dashboard.sh`](#toolsbaton-dashboardsh) - get/set the global `/baton` config
+- [`tools/baton-dashboard.sh`](#toolsbaton-dashboardsh) - get/set the global `/baton` config, or open the interactive dashboard
 - [`tools/project.sh`](#toolsprojectsh) - per-project session ledger
 
 All four tools are read-only against the event log unless documented otherwise. None require network access.
@@ -90,9 +90,10 @@ The `/baton` skill's backing CLI. Reads and writes `$XDG_CONFIG_HOME/baton/confi
 ### Usage
 
 ```bash
-tools/baton-dashboard.sh                 # interactive - currently same as `show`
+tools/baton-dashboard.sh                 # no args: same as `show`
 tools/baton-dashboard.sh show
 tools/baton-dashboard.sh set key=value [key2=value2 ...]
+tools/baton-dashboard.sh tui             # interactive tabbed dashboard; needs a real terminal
 ```
 
 `show` annotates each key with its effective source - `[env]` (an exported `BATON_*` var), `[config]` (a value written to `config.json`), or `[default]` (the compiled default) - so a configured value is never mistaken for a built-in default.
@@ -109,6 +110,33 @@ tools/baton-dashboard.sh set key=value [key2=value2 ...]
 | `max_terminals_per_workstream` | integer >= 0 | Cap on terminals bound to one workstream. |
 | `auto_continue_mode` | enum: `off` / `tmux` / `relaunch` | Auto-continue driver the `baton` launcher (`tools/baton-run.sh`) dispatches on. Default `off`; legacy `BATON_AUTO_CONTINUE=1` resolves to effective `tmux`. |
 | `launch_alias` | alias name | Installs/rewrites a marker-guarded `alias <name>='bash <repo>/tools/baton-run.sh'` rc block. Rejects empty names, metacharacters, shell builtins/keywords, and names already on PATH. |
+
+### Interactive mode (`tui`)
+
+```bash
+tools/baton-dashboard.sh tui
+```
+
+`interactive` and `dashboard` are accepted as aliases for `tui`.
+
+The TUI needs a real terminal: it checks that stdin *and* stdout are both TTYs and prints plain `show` output instead when either is not, so it stays safe in pipes, scripts, cron, and agent tool calls.
+
+| Tab | Key | Contents |
+|---|---|---|
+| Status | `1` | Read-only live monitor: context fill %, the checkpoint threshold, the effective `auto_continue_mode`, whether a checkpoint is owed, and the session id bound to this terminal. |
+| Config | `2` | The editor. One row per editable key `show` prints, carrying the same label, value, and effective-source tag: `[env]`, `[config]` or `[default]` for keys routed through `_cfg::get`, and `[config-only]` for keys read straight out of `config.json`. (`[env-only by design]` tags only `BATON_DIR` and `BATON_PROJECT_DIR`, which this tab omits - see below.) |
+| History | `3` | The last 10 entries from `tools/cost.sh --last 10`. Needs `jq`; says so when `jq` is absent, and prints a notice rather than a table when the event log has nothing yet. |
+| Workstreams | `4` | The `*.md` progress files found in `BATON_PROGRESS_DIR`. |
+
+| Key | Action |
+|---|---|
+| `1`-`4` | Switch tab |
+| `up` / `down` | Move the cursor (Config tab only) |
+| `enter` | Edit the selected key (Config tab only) - prompts for a new value and writes it through the same validation path as `set` |
+| `r` | Redraw |
+| `q` | Quit |
+
+`BATON_DIR`, `BATON_PROJECT_DIR` and `template_version` are **read-only**. `show` prints them, but the Config tab omits them entirely rather than offering an edit that `set` would not write.
 
 ### Safety
 

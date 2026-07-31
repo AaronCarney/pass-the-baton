@@ -5,6 +5,11 @@ set -u
 HOOKS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_DIR="$(cd "$HOOKS_DIR/../.." && pwd)"
 
+# Backstop: two tests write a zz-*.md probe into the tracked commands/ dir and
+# rm it synchronously before their asserts. If the suite is killed mid-test the
+# trap sweeps any stray probe so nothing is stranded in a released directory.
+trap 'rm -f "$REPO_DIR"/commands/zz-*.md' EXIT
+
 PASSED=0
 FAILED=0
 FAILED_CASES=()
@@ -353,6 +358,278 @@ run_uninstall_removes_skills() {
   rm -rf "$d"
 }
 run_uninstall_removes_skills
+
+echo "## install/uninstall commands"
+
+# install.sh copies commands/ into the target project's .claude/commands/.
+run_install_copies_commands() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "CMD: install copies renew command" "[ -f '$d/proj/.claude/commands/renew.md' ]"
+  assert "CMD: install copies off command" "[ -f '$d/proj/.claude/commands/off.md' ]"
+  assert "CMD: install copies snooze command" "[ -f '$d/proj/.claude/commands/snooze.md' ]"
+  # Idempotent re-install: step 4c's [ ! -e ] guard must make a second install a
+  # no-op over the command files. A plain before/after content compare cannot
+  # see a re-copy of the SAME bytes, so mark one file first - the marker is what
+  # a regressed guard would wipe. The other two are compared byte-for-byte
+  # against the repo's shipped copies with cmp -s, the instrument
+  # run_verify_idempotency_check already uses higher up in this file.
+  echo "local edit" >> "$d/proj/.claude/commands/renew.md"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "CMD: re-install does not overwrite an edited command" \
+    "grep -q 'local edit' '$d/proj/.claude/commands/renew.md'"
+  assert "CMD: re-install leaves off command byte-identical" \
+    "cmp -s '$REPO_DIR/commands/off.md' '$d/proj/.claude/commands/off.md'"
+  assert "CMD: re-install leaves snooze command byte-identical" \
+    "cmp -s '$REPO_DIR/commands/snooze.md' '$d/proj/.claude/commands/snooze.md'"
+  rm -rf "$d"
+}
+run_install_copies_commands
+
+# The target's command dir is shared with the user's own commands (the owner's
+# real target holds catchup.md and consolidate.md), so the copy must never
+# clobber a name it did not install, and must leave bystanders alone.
+run_install_preserves_foreign_commands() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj/.claude/commands"
+  echo "mine" > "$d/proj/.claude/commands/catchup.md"
+  echo "theirs" > "$d/proj/.claude/commands/renew.md"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "CMD: unrelated command file untouched" \
+    "[ \"\$(cat '$d/proj/.claude/commands/catchup.md')\" = 'mine' ]"
+  assert "CMD: pre-existing same-name file not overwritten" \
+    "[ \"\$(cat '$d/proj/.claude/commands/renew.md')\" = 'theirs' ]"
+  rm -rf "$d"
+}
+run_install_preserves_foreign_commands
+
+# uninstall (explicit target) removes the copied commands and nothing else.
+run_uninstall_removes_commands() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  echo "mine" > "$d/proj/.claude/commands/catchup.md"
+  XDG_CONFIG_HOME="$d/.config" HOME="$d" \
+    bash "$REPO_DIR/tools/uninstall.sh" --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "CMD: uninstall removes renew command" "[ ! -e '$d/proj/.claude/commands/renew.md' ]"
+  assert "CMD: uninstall removes off command" "[ ! -e '$d/proj/.claude/commands/off.md' ]"
+  assert "CMD: uninstall removes snooze command" "[ ! -e '$d/proj/.claude/commands/snooze.md' ]"
+  assert "CMD: unrelated command file survives uninstall" \
+    "[ -f '$d/proj/.claude/commands/catchup.md' ]"
+  rm -rf "$d"
+}
+run_uninstall_removes_commands
+
+# A user's own file that happens to share a name with a shipped command is not
+# baton's to delete: install skips it (never wrote it), so uninstall must leave
+# it alone. Without a content check, name-matched removal deletes it.
+run_uninstall_preserves_same_name_user_command() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj/.claude/commands"
+  echo "theirs" > "$d/proj/.claude/commands/renew.md"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  XDG_CONFIG_HOME="$d/.config" HOME="$d" \
+    bash "$REPO_DIR/tools/uninstall.sh" --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  assert "CMD: user's same-name command survives uninstall" \
+    "[ \"\$(cat '$d/proj/.claude/commands/renew.md')\" = 'theirs' ]"
+  assert "CMD: same-name collision does not block removal of the rest" \
+    "[ ! -e '$d/proj/.claude/commands/off.md' ]"
+  rm -rf "$d"
+}
+run_uninstall_preserves_same_name_user_command
+
+echo "## install-surface library"
+
+# The library is the single source of truth for what an install produces. Both
+# installers and the verifier read it, so its contract is asserted directly
+# rather than only through its callers.
+run_install_surface_contract() {
+  local out
+  # shellcheck source=/dev/null
+  source "$REPO_DIR/tools/lib/install-surface.sh"
+  assert "SURFACE: skills array carries baton" \
+    "printf '%s\n' \"\${INSTALL_SURFACE_SKILLS[@]}\" | grep -qx baton"
+  assert "SURFACE: skills array carries install-baton" \
+    "printf '%s\n' \"\${INSTALL_SURFACE_SKILLS[@]}\" | grep -qx install-baton"
+  out=$(install_surface_paths "$REPO_DIR")
+  assert "SURFACE: emits baton SKILL.md path" \
+    "printf '%s' \"$out\" | grep -qx '.claude/skills/baton/SKILL.md'"
+  assert "SURFACE: emits install-baton SKILL.md path" \
+    "printf '%s' \"$out\" | grep -qx '.claude/skills/install-baton/SKILL.md'"
+  assert "SURFACE: emits every shipped command" \
+    "[ \"\$(printf '%s' \"$out\" | grep -c '^.claude/commands/')\" = \"\$(ls '$REPO_DIR'/commands/*.md | wc -l)\" ]"
+  assert "SURFACE: emits renew command path" \
+    "printf '%s' \"$out\" | grep -qx '.claude/commands/renew.md'"
+  # Drift guard: a command added to commands/ must appear with no edit here.
+  local tmpcmd="$REPO_DIR/commands/zz-surface-probe.md"
+  echo "probe" > "$tmpcmd"
+  out=$(install_surface_paths "$REPO_DIR")
+  rm -f "$tmpcmd"
+  assert "SURFACE: a newly added command is picked up with no edit to the enumerator" \
+    "printf '%s' \"$out\" | grep -qx '.claude/commands/zz-surface-probe.md'"
+  # Every emitted path must actually resolve inside the repo, or the verifier
+  # would demand files that were never shipped.
+  local rel bad=0
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    case "$rel" in
+      .claude/skills/*) [ -f "$REPO_DIR/$rel" ] || bad=1 ;;
+      .claude/commands/*) [ -f "$REPO_DIR/commands/$(basename "$rel")" ] || bad=1 ;;
+    esac
+  done <<EOF
+$(install_surface_paths "$REPO_DIR")
+EOF
+  assert "SURFACE: every emitted path resolves to a real repo artifact" "[ $bad -eq 0 ]"
+}
+run_install_surface_contract
+
+echo "## installers read the shared surface"
+
+# The point of the shared list is that it is the ONLY list. Grep is the direct
+# evidence: a literal skill name left in either installer means a second source
+# of truth survived the refactor and can drift again.
+run_installers_consume_shared_surface() {
+  assert "SURFACE-WIRE: install.sh sources the surface lib" \
+    "grep -q 'lib/install-surface.sh' '$REPO_DIR/tools/install.sh'"
+  assert "SURFACE-WIRE: uninstall.sh sources the surface lib" \
+    "grep -q 'lib/install-surface.sh' '$REPO_DIR/tools/uninstall.sh'"
+  assert "SURFACE-WIRE: install.sh no longer hardcodes the skill pair" \
+    "! grep -q 'for _skill in baton install-baton' '$REPO_DIR/tools/install.sh'"
+  assert "SURFACE-WIRE: uninstall.sh no longer hardcodes the skill pair" \
+    "! grep -q 'for _skill in baton install-baton' '$REPO_DIR/tools/uninstall.sh'"
+  assert "SURFACE-WIRE: install.sh iterates the shared array" \
+    "grep -q 'INSTALL_SURFACE_SKILLS\\[@\\]' '$REPO_DIR/tools/install.sh'"
+  assert "SURFACE-WIRE: uninstall.sh iterates the shared array" \
+    "grep -q 'INSTALL_SURFACE_SKILLS\\[@\\]' '$REPO_DIR/tools/uninstall.sh'"
+}
+run_installers_consume_shared_surface
+
+echo "## verify-install installed-surface check"
+
+# A complete install must pass the surface check.
+run_verify_surface_passes_on_complete_target() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  HOME="$d" XDG_CONFIG_HOME="$d/.config" \
+    bash "$REPO_DIR/tools/verify-install.sh" --settings "$d/settings.json" --skip-suite --target "$d/proj" >/dev/null 2>&1
+  local rc=$?
+  assert "SURFACE-VERIFY: exit 0 against a freshly installed target" "[ $rc -eq 0 ]"
+  rm -rf "$d"
+}
+run_verify_surface_passes_on_complete_target
+
+# A target missing a command must fail, and the message must name the file -
+# a bare count would not tell an installing agent what to fix.
+run_verify_surface_fails_on_missing_command() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  rm -f "$d/proj/.claude/commands/renew.md"
+  local out rc
+  out=$(HOME="$d" XDG_CONFIG_HOME="$d/.config" \
+    bash "$REPO_DIR/tools/verify-install.sh" --settings "$d/settings.json" --skip-suite --target "$d/proj" 2>&1)
+  rc=$?
+  assert "SURFACE-VERIFY: non-zero exit when a command is missing" "[ $rc -ne 0 ]"
+  assert "SURFACE-VERIFY: message names the missing command" \
+    "printf '%s' \"$out\" | grep -q 'renew.md'"
+  rm -rf "$d"
+}
+run_verify_surface_fails_on_missing_command
+
+# Partially populated, not merely absent: the skill directory is present but
+# its SKILL.md is gone. A directory-existence check would pass this.
+run_verify_surface_fails_on_partial_skill() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  rm -f "$d/proj/.claude/skills/baton/SKILL.md"
+  local out rc
+  out=$(HOME="$d" XDG_CONFIG_HOME="$d/.config" \
+    bash "$REPO_DIR/tools/verify-install.sh" --settings "$d/settings.json" --skip-suite --target "$d/proj" 2>&1)
+  rc=$?
+  assert "SURFACE-VERIFY: non-zero exit when a skill dir is present but empty" "[ $rc -ne 0 ]"
+  assert "SURFACE-VERIFY: message names the missing skill file" \
+    "printf '%s' \"$out\" | grep -q 'skills/baton/SKILL.md'"
+  rm -rf "$d"
+}
+run_verify_surface_fails_on_partial_skill
+
+# A wholly absent .claude/ tree is the agent-installed-it-wrong case.
+run_verify_surface_fails_on_empty_target() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj" "$d/empty"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  HOME="$d" XDG_CONFIG_HOME="$d/.config" \
+    bash "$REPO_DIR/tools/verify-install.sh" --settings "$d/settings.json" --skip-suite --target "$d/empty" >/dev/null 2>&1
+  local rc=$?
+  assert "SURFACE-VERIFY: non-zero exit against a target with no .claude tree" "[ $rc -ne 0 ]"
+  rm -rf "$d"
+}
+run_verify_surface_fails_on_empty_target
+
+# Without --target the check must not run at all: TARGET defaults to $PWD,
+# which in a dev checkout is the repo and has no .claude/commands/.
+run_verify_surface_skipped_without_target() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  local out rc
+  out=$(cd "$REPO_DIR" && HOME="$d" XDG_CONFIG_HOME="$d/.config" \
+    bash "$REPO_DIR/tools/verify-install.sh" --settings "$d/settings.json" --skip-suite 2>&1)
+  rc=$?
+  assert "SURFACE-VERIFY: exit 0 with no --target (surface check skipped)" "[ $rc -eq 0 ]"
+  assert "SURFACE-VERIFY: no surface line emitted without --target" \
+    "! printf '%s' \"$out\" | grep -q 'installed surface'"
+  rm -rf "$d"
+}
+run_verify_surface_skipped_without_target
+
+# Coverage is enumerator-driven, so a command added later is checked with no
+# edit to verify-install.sh. Prove it by adding one and deleting it from an
+# otherwise-complete target.
+run_verify_surface_covers_new_commands() {
+  local d; d=$(mktemp -d); mkdir -p "$d/proj"
+  local tmpcmd="$REPO_DIR/commands/zz-verify-probe.md"
+  echo "probe" > "$tmpcmd"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  rm -f "$d/proj/.claude/commands/zz-verify-probe.md"
+  local out rc
+  out=$(HOME="$d" XDG_CONFIG_HOME="$d/.config" \
+    bash "$REPO_DIR/tools/verify-install.sh" --settings "$d/settings.json" --skip-suite --target "$d/proj" 2>&1)
+  rc=$?
+  rm -f "$tmpcmd"
+  assert "SURFACE-VERIFY: a command added after the check was written is covered" "[ $rc -ne 0 ]"
+  assert "SURFACE-VERIFY: message names the newly added command" \
+    "printf '%s' \"$out\" | grep -q 'zz-verify-probe.md'"
+  rm -rf "$d"
+}
+run_verify_surface_covers_new_commands
+
+# Vacuous-pass guard: if the enumerator emits zero lines the check must FAIL, not
+# report "complete" having verified nothing - that silent pass is the exact shape
+# of the original defect. Drive it with a scratch verify whose sibling surface lib
+# is stubbed to emit nothing; every other check passes off a real install so only
+# the empty enumerator can fail it.
+run_verify_surface_fails_on_empty_enumerator() {
+  local d; d=$(mktemp -d); mkdir -p "$d/repo/tools/lib"
+  XDG_CONFIG_HOME="$d/.config" BATON_PROJECT_DIR="$d/proj" HOME="$d" \
+    bash "$REPO_DIR/tools/install.sh" --non-interactive --settings "$d/settings.json" --target "$d/proj" >/dev/null 2>&1
+  cp "$REPO_DIR/tools/verify-install.sh" "$d/repo/tools/verify-install.sh"
+  printf '%s\n' '#!/bin/bash' 'install_surface_paths() { :; }' > "$d/repo/tools/lib/install-surface.sh"
+  local out rc
+  out=$(HOME="$d" XDG_CONFIG_HOME="$d/.config" \
+    bash "$d/repo/tools/verify-install.sh" --settings "$d/settings.json" --skip-suite --target "$d/proj" 2>&1)
+  rc=$?
+  assert "SURFACE-VERIFY: non-zero exit when the enumerator emits zero paths" "[ $rc -ne 0 ]"
+  assert "SURFACE-VERIFY: message flags the empty enumerator, not a missing file" \
+    "printf '%s' \"$out\" | grep -q 'no paths'"
+  rm -rf "$d"
+}
+run_verify_surface_fails_on_empty_enumerator
 
 echo ""
 echo "====================================="

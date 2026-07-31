@@ -8,12 +8,15 @@
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
+# shellcheck source=/dev/null
+source "$REPO_DIR/tools/lib/install-surface.sh"
 
 SETTINGS="$HOME/.claude/settings.json"
 SKIP_SUITE=0
 PRE_COMMIT=0
 IDEM=0
 TARGET="$PWD"
+TARGET_EXPLICIT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -21,7 +24,7 @@ while [ $# -gt 0 ]; do
     --skip-suite)         SKIP_SUITE=1; shift ;;
     --pre-commit-only)    PRE_COMMIT=1; shift ;;
     --idempotency-check)  IDEM=1; shift ;;
-    --target)             TARGET="$2"; shift 2 ;;
+    --target)             TARGET="$2"; TARGET_EXPLICIT="$2"; shift 2 ;;
     *) echo "usage: verify-install.sh [--settings <path>] [--skip-suite] [--pre-commit-only] [--idempotency-check --target <dir>]"; exit 2 ;;
   esac
 done
@@ -42,6 +45,38 @@ for EV in SessionStart PreToolUse PostToolUse SessionEnd UserPromptSubmit; do
   check "settings.json has $EV hook" \
     "[ -f '$SETTINGS' ] && jq -e --arg ev '$EV' '.hooks[\$ev] | map(.hooks[].command) | map(test(\"checkpoint|session-start|cleanup-on-exit|project-detect\")) | any' '$SETTINGS' >/dev/null 2>&1"
 done
+
+# 1b. Installed surface. The settings.json checks above prove the hooks are
+# wired; they say nothing about whether the skills and commands actually landed
+# in the target. That gap is why the commands copy was missing from install.sh
+# for two releases while both this tool and doctor.sh reported clean.
+#
+# Expected paths come from tools/lib/install-surface.sh, so a file added to
+# commands/ later is covered without editing this check.
+#
+# Only runs when --target was given explicitly: TARGET defaults to $PWD, and in
+# a dev checkout that is the repo itself, which has no .claude/commands/.
+if [ -n "$TARGET_EXPLICIT" ]; then
+  _surface_missing=""
+  _surface_count=0
+  while IFS= read -r _rel; do
+    [ -n "$_rel" ] || continue
+    _surface_count=$((_surface_count+1))
+    [ -f "$TARGET_EXPLICIT/$_rel" ] || _surface_missing="$_surface_missing $_rel"
+  done <<EOF
+$(install_surface_paths "$REPO_DIR")
+EOF
+  if [ "$_surface_count" -eq 0 ]; then
+    echo "  FAIL installed surface enumerator emitted no paths - verified nothing in $TARGET_EXPLICIT"
+    FAIL=$((FAIL+1))
+  elif [ -n "$_surface_missing" ]; then
+    echo "  FAIL installed surface incomplete in $TARGET_EXPLICIT - missing:$_surface_missing"
+    FAIL=$((FAIL+1))
+  else
+    echo "  OK   installed surface complete in $TARGET_EXPLICIT"
+  fi
+  unset _rel _surface_missing _surface_count
+fi
 
 # 2. Pre-commit-only fast path: just confirm hook script files exist + are bash.
 if [ "$PRE_COMMIT" = "1" ]; then

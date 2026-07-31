@@ -11,6 +11,9 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_DIR="$(cd "$REPO_DIR/.." && pwd -P)"
 
+# shellcheck source=/dev/null
+source "$REPO_DIR/tools/lib/install-surface.sh"
+
 INTERACTIVE=1
 [ ! -t 0 ] && INTERACTIVE=0
 TARGET="${BATON_PROJECT_DIR:-$PWD}"
@@ -169,13 +172,34 @@ fi
 # enough to yield slash commands). Copy the kept skills into the target.
 SKILLS_DEST="$TARGET/.claude/skills"
 mkdir -p "$SKILLS_DEST"
-for _skill in baton install-baton; do
+for _skill in "${INSTALL_SURFACE_SKILLS[@]}"; do
   if [ -d "$REPO_DIR/.claude/skills/$_skill" ] && [ ! -e "$SKILLS_DEST/$_skill" ]; then
     cp -R "$REPO_DIR/.claude/skills/$_skill" "$SKILLS_DEST/$_skill"
     echo "OK: installed skill $_skill -> $SKILLS_DEST/$_skill"
   fi
 done
 unset _skill
+
+# 4c. Install project-local commands (Claude Code discovers slash commands by
+# scanning a project .claude/commands/ dir). The plugin channel gets these for
+# free - a plugin's root-level commands/ is auto-discovered - but a
+# settings-channel install has no equivalent step, so copy them here.
+#
+# Deliberately NOT declared in .claude-plugin/plugin.json: per the plugin
+# reference's "Path behavior rules", a `commands` key REPLACES the default scan
+# rather than adding to it (unlike `skills`, which is additive). Declaring it
+# would suppress the auto-discovery that already works for plugin installs.
+COMMANDS_DEST="$TARGET/.claude/commands"
+mkdir -p "$COMMANDS_DEST"
+for _cmd in "$REPO_DIR"/commands/*.md; do
+  [ -e "$_cmd" ] || continue
+  _cmd_base=$(basename "$_cmd")
+  if [ ! -e "$COMMANDS_DEST/$_cmd_base" ]; then
+    cp "$_cmd" "$COMMANDS_DEST/$_cmd_base"
+    echo "OK: installed command $_cmd_base -> $COMMANDS_DEST/$_cmd_base"
+  fi
+done
+unset _cmd _cmd_base COMMANDS_DEST
 
 # 5. Merge settings.json.
 mkdir -p "$(dirname "$SETTINGS")"

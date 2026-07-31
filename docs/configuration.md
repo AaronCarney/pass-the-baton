@@ -99,9 +99,11 @@ Launch `bash tools/baton-run.sh` **instead of** `claude` - any arguments pass st
 
 **First use:** the relaunch is a real process termination, not a `/clear`. Before relying on it, run it once in your real terminal and confirm the session ends only after a turn completes and the fresh session comes back with your progress injected. The driver is off by default and abortable (delete the done-flag), and every committed action is logged, so a mis-fire is diagnosable.
 
-## Manual checkpoint (/pass-the-baton:renew)
+## Early handoff (/pass-the-baton:renew)
 
-Run `/pass-the-baton:renew` to fire a checkpoint immediately, before the context-fill threshold is reached. It arms a one-shot per-session flag that the checkpoint hook consumes on your next action, running the identical save-and-handoff path as an automatic threshold crossing. It is context-% independent, so it works even if your statusline is not emitting a percentage.
+Run `/pass-the-baton:renew` to fire a checkpoint immediately, before the context-fill threshold is reached. It arms a one-shot per-session flag that the checkpoint hook consumes on your next action, running the same save-and-handoff path a threshold crossing would. It is context-% independent, so it works even if your statusline is not emitting a percentage.
+
+Renew writes the progress file and then hands off, because `/clear` on its own would skip that write. It asks nothing: invoking it is already the decision to end the session. This is case 1B in `docs/context-baton.md` § Checkpoint Modes. Do not read "manual" in that section as a synonym for renew - it names the manual *mode* (`auto_continue_mode=off`), which also covers threshold-fired checkpoints.
 
 It composes with whichever driver is active (tmux or relaunch): after the save, the same driver continues the session.
 

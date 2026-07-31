@@ -2,7 +2,8 @@
 # restore-workstream.sh <ws-id>
 # Copies an archived workstream record back to the live tracking dir.
 # If the workstream's progress_file points at a missing path, also restores
-# the matching archived progress file from ${BATON_ARCHIVE_DIR}/progress/<YYYY-MM>/.
+# the matching archived progress file from ${BATON_ARCHIVE_DIR}/progress/<YYYY-MM>/
+# or ${BATON_ARCHIVE_DIR}/progress-cold/<YYYY-MM>/.
 # Idempotent: re-running on an already-restored workstream is a no-op.
 #
 # Usage: bash tools/restore-workstream.sh <ws-id>
@@ -74,7 +75,10 @@ fi
 PROG=$(jq -r '.progress_file // empty' "$DEST" 2>/dev/null)
 if [ -n "$PROG" ] && [ ! -f "$PROG" ]; then
   PROG_BASE=$(basename "$PROG")
-  for pf in "$ARCHIVE/progress"/*/"$PROG_BASE"; do
+  # Both tiers: the cleanup cron moves progress files older than
+  # BATON_PROGRESS_COLD_DAYS from progress/ to progress-cold/, and a restore must
+  # still find them there.
+  for pf in "$ARCHIVE/progress"/*/"$PROG_BASE" "$ARCHIVE/progress-cold"/*/"$PROG_BASE"; do
     [ -f "$pf" ] || continue
     mkdir -p "$(dirname "$PROG")"
     cp "$pf" "$PROG"

@@ -119,6 +119,8 @@ Empty arrays are valid (`"tasks_done": []`). Do not leave the literal placeholde
 <!--
 Hard constraints (e.g., do not push, do not delete X, test baselines that must hold) and soft constraints (response style, no timeline framing, deterministic-where-possible).
 
+**Attribute every constraint.** Mark each one OWNER (the user stated it - quote it or stay close to their words) or DERIVED (you concluded it). A DERIVED entry must carry the evidence that produced it - file:line, command output, commit - so the next session can re-check it rather than inherit it. Never write an absolute the user did not state, and never stamp your own conclusion "authoritative", "settled", or "do not relitigate": the next session is told to follow this file literally, so an unattributed inference becomes permanent law under the owner's name. Prefer the checkable fact ("no remote is configured") over a prohibition ("never push"). Current state, a gate needing approval, and a prohibition are three different things - do not collapse them. When you restate a design rule here, point at the doc that governs it instead of paraphrasing it; a paraphrase is where the drift starts.
+
 Write "None" or "No active blockers" if empty - V8 rejects empty placeholders. Bullet list is the convention but prose is acceptable.
 -->
 

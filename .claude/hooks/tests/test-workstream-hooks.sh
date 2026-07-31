@@ -1897,6 +1897,42 @@ fi
 TS_SRC=$(CLAUDE_TERMINAL_ID="" _BATON_BOOT_ID=boot-marker bash -c 'source "'$HOOKS_DIR'/lib/workstream-lib.sh"; term_hash_source')
 assert "term_hash_source reports the tier, not the salted input" "case '$TS_SRC' in *boot-marker*) false ;; *) true ;; esac"
 
+# E5 item 3b: resolve_progress_file must not return a .scaffold.md from either
+# fallback branch. Both branches keep the lexicographically LAST match, and a
+# scaffold sharing its real file's timestamp sorts after it, so without the
+# exclusion the handoff resolves to a scaffold. Mirrors the filter already
+# carried by _find_prior_progress and the write-trigger's rolloff lookup.
+run_t_resolve_excludes_scaffold() {
+  source "$HOOKS_DIR/lib/workstream-lib.sh"
+  local d; d=$(mktemp -d)
+  mkdir -p "$d/docs/sessions"
+  local real="$d/docs/sessions/progress-scafws-aaa111-20260101-010101.md"
+  local scaf="$d/docs/sessions/progress-scafws-aaa111-20260101-010101.scaffold.md"
+  printf '## real\n'     > "$real"
+  printf '## scaffold\n' > "$scaf"
+
+  # Fallback 1: workstream-name match, empty "latest" pointer.
+  local got
+  got=$(BATON_PROGRESS_DIR="$d/docs/sessions" resolve_progress_file "" "$d" "scafws" "")
+  assert "E5-3b: fallback 1 does not resolve to a scaffold" \
+    "[ \"$got\" = \"$real\" ]"
+
+  # Fallback 2: display-name match, no workstream.
+  got=$(BATON_PROGRESS_DIR="$d/docs/sessions" resolve_progress_file "" "$d" "" "scafws")
+  assert "E5-3b: fallback 2 does not resolve to a scaffold" \
+    "[ \"$got\" = \"$real\" ]"
+
+  # A directory holding ONLY a scaffold has no resolvable progress file.
+  local e; e=$(mktemp -d)
+  mkdir -p "$e/docs/sessions"
+  printf '## scaffold only\n' > "$e/docs/sessions/progress-onlyscaf-bbb222-20260101-010101.scaffold.md"
+  BATON_PROGRESS_DIR="$e/docs/sessions" resolve_progress_file "" "$e" "onlyscaf" "" >/dev/null
+  assert "E5-3b: scaffold-only directory resolves nothing (rc=1)" "[ $? -eq 1 ]"
+
+  rm -rf "$d" "$e"
+}
+run_t_resolve_excludes_scaffold
+
 echo
 echo "====================================="
 echo "Results: $PASS passed, $FAIL failed"

@@ -78,6 +78,14 @@ run_cc_noreset() {
     bash "$CC" 2>/dev/null
 }
 
+# The scaffold name is derived from the write path, which is per-checkpoint unique,
+# so it cannot be reconstructed from ws+term_hash. Take it from the instruction the
+# hook emitted - that is also the only path the model is ever told to read.
+scaffold_from_out() {
+  printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null \
+    | grep -A1 'pre-rendered scaffold' | tail -1 | tr -d ' \t'
+}
+
 cleanup_sid() {
   rm -f "/tmp/claude-context-pct-$1" "/tmp/claude-context-triggered-$1" \
         "/tmp/baton-pending-$1" "/tmp/baton-done-$1" "/tmp/baton-archive-$1" \
@@ -411,9 +419,10 @@ run_p3() {
   printf '## Archived\n- [x] real prior item\n' > "$proj/docs/sessions/progress-${ws}-aaa111.md"
   sleep 1
   printf '## Archived\n- [x] SCAFFOLD LEFTOVER\n' > "$proj/docs/sessions/progress-${ws}-aaa111.scaffold.md"
-  run_cc "$proj" "$sid" "$term" >/dev/null
-  # Named, not globbed: both scaffolds match the glob and head -1 is lexicographic.
-  local rendered="$proj/docs/sessions/progress-${ws}-${th}.scaffold.md"
+  local out; out=$(run_cc "$proj" "$sid" "$term")
+  # Read back from the emitted instruction, not a glob: the planted leftover
+  # scaffold also matches progress-<ws>-*.scaffold.md and head -1 is lexicographic.
+  local rendered; rendered=$(scaffold_from_out "$out")
   if [ ! -f "$rendered" ]; then
     _bad "P3: hook did not render a scaffold at the expected path ($rendered)"
   fi
@@ -455,8 +464,8 @@ run_p3c() {
   mkdir -p "$proj/archive/progress/2026-01"
   printf '## Archived\n- [x] archived prior item\n' \
     > "$proj/archive/progress/2026-01/progress-${ws}-bbb222.md"
-  run_cc "$proj" "$sid" "$term" >/dev/null
-  local rendered="$proj/docs/sessions/progress-${ws}-${th}.scaffold.md"
+  local out; out=$(run_cc "$proj" "$sid" "$term")
+  local rendered; rendered=$(scaffold_from_out "$out")
   local body; body=$(cat "$rendered" 2>/dev/null)
   assert_contains "P3c: carry-forward falls back to the archive root" "$body" 'archived prior item'
   cleanup_sid "$sid"; rm -rf "$proj"

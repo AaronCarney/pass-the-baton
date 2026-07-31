@@ -116,11 +116,13 @@ Full env-var table (paths, TTLs, archive dirs): [`docs/context-baton.md` § Conf
 
 After a checkpoint saves, Pass the Baton can continue the session for you instead of leaving you to `/clear` and re-prompt by hand. The driver is the `auto_continue_mode` config key (`off` by default; `tmux` drives `/clear` + a continue nudge into your pane, `relaunch` runs a fresh-session supervisor loop). Opt into a `baton` launch alias at install time (the 6th prompt) - then you launch with `baton` instead of `claude`, and it honors whichever driver you've set. Switch drivers any time with `/baton set auto_continue_mode=tmux`. Details: [`docs/configuration.md` § Auto-continue](docs/configuration.md).
 
-Need to hand off early, before the threshold trips? Run **`/pass-the-baton:renew`** - it fires a checkpoint immediately, running the identical save-and-handoff path as an automatic threshold crossing, independent of the reported context %.
+That key is also what picks your **mode**. `off` is manual mode: you decide when the handoff happens, and a threshold crossing reminds you to take it. `tmux` and `relaunch` are automatic mode: the whole cycle runs unattended and never reminds you of anything. Full definition: [`docs/context-baton.md` § Checkpoint Modes](docs/context-baton.md).
+
+Need to hand off early, before the threshold trips? Run **`/pass-the-baton:renew`** - it writes the progress file and hands off immediately, independent of the reported context %. It asks nothing, because running it is already your decision to end the session.
 
 Need it out of the way instead? **`/pass-the-baton:off`** disables checkpointing
 for the rest of the session; **`/pass-the-baton:snooze [minutes]`** defers it
-(default 10, max 120). Neither saves what is already owed.
+(default 10, max 120). Neither saves what is already owed. All three ship on both install channels: the plugin namespaces them as `/pass-the-baton:<name>`, and `tools/install.sh` copies them into your project's `.claude/commands/`, where they are addressed bare - `/renew`, `/off`, `/snooze`.
 
 ### `/baton` skill + progress-file templates
 
@@ -139,7 +141,10 @@ The active template, threshold percent, and a few other knobs are managed by the
 ```bash
 tools/baton-dashboard.sh show
 tools/baton-dashboard.sh set template=task threshold_pct=20
+tools/baton-dashboard.sh tui                      # interactive tabbed dashboard
 ```
+
+`tui` opens a tabbed dashboard - Status, Config, History, Workstreams - where the Config tab edits config keys through the same write path as `set`. It needs a real terminal and prints plain `show` output when it does not have one, so it is not something an agent can drive for you.
 
 Flag-by-flag reference: [`docs/cli.md § baton-dashboard.sh`](docs/cli.md#toolsbaton-dashboardsh). Template design rationale and the validation pipeline live in [`docs/context-baton.md § Progress File Format`](docs/context-baton.md#progress-file-format).
 
@@ -237,7 +242,7 @@ Prompt and completion text are never captured by either writer; tool arguments a
 
 ## Tests
 
-149 shell test suites, grouped by concern:
+151 shell test suites, grouped by concern:
 
 - **Core flow:** `test-workstream-hooks.sh`, `test-restore-workstream.sh`, `test-prompt-sync.sh`
 - **Install / verify:** `test-install-tools.sh`, `test-installer-nfs-warn.sh`, `test-installer-post-tool-batch.sh`, `test-installer-tool-timing.sh`, `test-doctor.sh`

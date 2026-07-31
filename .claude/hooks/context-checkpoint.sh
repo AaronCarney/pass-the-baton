@@ -498,10 +498,34 @@ log_event "$PROJECT_DIR" checkpoint triggered \
   "pct=$PCT" "workstream=$WORKSTREAM" "session_id=$SESSION_ID" 2>/dev/null || true
 
 # Compute the exact absolute path Claude should write to, and resolve active template.
-# Path is per-terminal scoped (TERM_HASH) to avoid cross-terminal collision.
+# Path is per-terminal scoped (TERM_HASH) to avoid cross-terminal collision, and
+# per-checkpoint scoped (TIMESTAMP) so the destination is always a NEW file.
+#
+# The timestamp is load-bearing, not cosmetic. Claude Code rejects a Write that
+# overwrites a file the session has not Read ("File has not been read yet"), and
+# the second checkpoint of a terminal targeted the first one's file - so the write
+# failed and the model read the whole stale progress file back in to retry, at the
+# one moment context is by definition exhausted. Nothing in that file is needed:
+# every carry-forward is already substituted into the scaffold below. A fresh
+# destination each fire removes the overwrite entirely.
+#
+# Second effect, also wanted: with a distinct name the prior file is no longer
+# skipped by checkpoint-write-trigger's "don't archive the file just written"
+# check, so it is archived instead of clobbered in place.
 TEMPLATE_PATH="$(tpl::resolve_active_template "$PROJECT_DIR")"
 # WORKSTREAM is guaranteed non-empty by the recovery ladder above.
-PROGRESS_PATH="$(checkpoint_progress_dir "$PROJECT_DIR")/progress-${WORKSTREAM}-${TERM_HASH}.md"
+# Basename shape stays progress-<ws>-<term_hash>-<ts>[-n].md: the write-trigger's
+# cross-workstream guard anchors on the progress-<ws>- prefix and the archive
+# marking loop above keys on TERM_HASH, so both keep matching.
+_CC_PROGRESS_BASE="$(checkpoint_progress_dir "$PROJECT_DIR")/progress-${WORKSTREAM}-${TERM_HASH}-${TIMESTAMP}"
+PROGRESS_PATH="${_CC_PROGRESS_BASE}.md"
+# Two checkpoints inside one second (forced fires, tests) would otherwise land on
+# the same name and reintroduce the overwrite this scheme exists to prevent.
+_CC_SEQ=2
+while [ -e "$PROGRESS_PATH" ]; do
+  PROGRESS_PATH="${_CC_PROGRESS_BASE}-${_CC_SEQ}.md"
+  _CC_SEQ=$((_CC_SEQ + 1))
+done
 
 # Locate most recent prior progress file for this workstream - drives the
 # <<ARCHIVED_CHECKBOXES>> carry-forward in tpl::render_progress_file. Looks first

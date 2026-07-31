@@ -4,6 +4,56 @@ Automatic session handoff when Claude Code's context fills up. A workstream
 record relays state between sessions; the per-terminal binding decides which
 workstream a given session belongs to.
 
+## Checkpoint Modes (governing definition)
+
+Pass the Baton has two **modes**. The mode is a setting the user selects, not an
+inference the system makes about the user: it is `auto_continue_mode`
+(`/baton set auto_continue_mode=off|tmux|relaunch`). Nothing may try to *detect*
+whether a person is present, or reason about why the user picked what they
+picked - the setting is the only discriminator. That manual mode has a user in
+the loop follows from the setting rather than being inferred from the session,
+and it is precisely why a reminder has an addressee there and none in automatic
+mode.
+
+| | Mode 1 - Manual (`off`) | Mode 2 - Automatic (`tmux`, `relaunch`) |
+|---|---|---|
+| Who drives the handoff | the user | nobody, it is unattended |
+| Reminder ("nag") | case 1A only | never |
+| Who starts the new session | the user | the driver |
+
+**Mode 1 is manual.** The user decides when the handoff happens. It has two
+entry points, differing only in what triggers the checkpoint:
+
+- **1A - threshold-fired.** The configured context threshold is crossed. The
+  drain gate holds the write while subagents finish and return their results;
+  the lead agent consolidates those results, in context or into a temp file;
+  the progress file is written; the user is given a synopsis. **Only then** may
+  the reminder begin. While it runs, user discussion aimed at understanding the
+  current situation is allowed and is not treated as evasion. The
+  continue-options window appears after the second user inquiry.
+- **1B - `/pass-the-baton:renew`.** The user has already decided to refresh
+  early, typically after pausing for a clarification or stopping a run of loops.
+  Renew exists because `/clear` on its own skips the progress-file write that a
+  threshold crossing would have produced. So renew writes the progress file and
+  then does what `/clear` does: this session ends and a new one begins. There is
+  no reminder and no keep-or-clear question, because invoking the command *is*
+  the answer to that question.
+
+**Mode 2 is automatic.** Threshold crossing, drain, consolidation, write, clear
+and relaunch all happen with no user action, in both the tmux and the standalone
+relaunch setups. The reminder has no addressee here and never fires.
+
+**The reminder exists only in case 1A.** That is its entire scope. It is not a
+budget, a counter, or an escalation to a deny.
+
+> **Implementation status (2026-07-26).** The code does not yet match this
+> definition. `context-checkpoint.sh:337` branches on `/tmp/baton-manual-<sid>`,
+> which records *what armed the checkpoint* (`/renew` vs threshold), and never
+> reads `auto_continue_mode`. The effect is that the reminder is absent from 1A,
+> where it belongs, and present in 1B, where it cannot serve any purpose. The
+> post-save keep-or-clear question is likewise attached to 1B instead of 1A.
+> This section is the target; see CHANGELOG `[Unreleased]`.
+
 ## How It Works
 
 1. The **statusline** writes the current context % to
@@ -22,12 +72,17 @@ workstream a given session belongs to.
      format schema.
    - One-shot per session (the trigger flag prevents re-fire).
 3. Claude reads this doc, then writes the progress file at exactly
-   `$BATON_PROGRESS_DIR/progress-<workstream>-<term_hash>.md`
+   `$BATON_PROGRESS_DIR/progress-<workstream>-<term_hash>-<timestamp>.md`
    (resolved at runtime by `checkpoint_progress_dir()` in
    `.claude/hooks/lib/workstream-lib.sh`; default
    `$BATON_DIR/progress/`, see the env-var table below). The
    PreToolUse hook computes and injects the exact absolute path -
-   Claude never has to derive it.
+   Claude never has to derive it. The timestamp makes every checkpoint a new
+   file on purpose: Claude Code refuses a Write that overwrites a file the
+   session has not Read, so a reused destination cost a failed write plus a
+   re-read of the stale progress file at the moment context is exhausted.
+   Nothing in the old file is needed - the carry-forward is pre-rendered into
+   the scaffold. The previous file is archived by step 4 rather than clobbered.
 4. The **PostToolUse hook** (`checkpoint-write-trigger.sh`, matcher
    `Write|Edit|MultiEdit`) fires when Claude writes any `progress-*.md`
    while a checkpoint is pending:
@@ -58,11 +113,15 @@ workstream a given session belongs to.
 ### While a checkpoint is owed but not yet written
 
 Between step 2 (the trigger fires and sets pending) and step 3 (the progress
-file lands), the checkpoint is **owed**. In that window each further tool call is
-met with a reminder to stop and write the progress file - and the reminder never
-gates. The reminder is a reminder, not a budget: there is no counter, no attempt
-limit, and no escalation to a deny, on either the automated (threshold-fired) or
-the manual (`/pass-the-baton:renew`) path.
+file lands), the checkpoint is **owed**. In that window each further tool call
+carries the instruction to stop and write the progress file. That instruction
+never gates, and it is not the reminder: there is no counter, no attempt limit,
+and no escalation to a deny here, in either mode.
+
+The reminder ("nag") is a **post-write** mechanism and does not live in this
+window at all. It belongs to case 1A only, and it begins after the progress file
+has landed and the user has been given the synopsis - at which point what it is
+reminding them to do is hand off. See Checkpoint Modes above.
 
 Two other mechanisms can still hold a tool call. Neither belongs to the reminder:
 
@@ -122,7 +181,7 @@ The workstream record. One file per workstream, overwritten in place.
 {
   "workstream": "main-20260509-131955-653278",
   "display_name": "my-project",
-  "progress_file": "/abs/path/to/progress-<ws>-<hash>.md",
+  "progress_file": "/abs/path/to/progress-<ws>-<hash>-<ts>.md",
   "phase": "implementation",
   "updated_at": "2026-05-09T13:30:00Z"
 }
@@ -157,7 +216,9 @@ is the **md5 hash** of `USER:<source>`, computed by
 These paths are **internal implementation detail**, listed here as a debugging
 aid only. They are **not** a stability contract - external tooling must not
 depend on their names, layout, or lifecycle, all of which may change without
-notice.
+notice. They describe the code as it stands today; `baton-manual-<sid>` and
+`baton-consent-<sid>` both encode the superseded trigger-based split and will
+change when the code is brought in line with Checkpoint Modes above.
 
 - `/tmp/baton-subagents-active-<parent_sid>/<agent_id>` - one file per in-flight
   subagent; the directory listing is the active count. Written at SubagentStart,
@@ -295,6 +356,7 @@ checkpoint or a resume.
 | `BATON_SNOOZE_MAX_MIN` | `120` | Upper bound on `/pass-the-baton:snooze [minutes]`. Deferring longer is a decision to stop checkpointing; use `/pass-the-baton:off` for that. |
 | `BATON_WORKSTREAM_TTL_DAYS` | `30` | Days before a workstream record is archived. |
 | `BATON_TRACKING_TTL_DAYS` | `7` | Days before a per-session tracking pointer is reaped. |
+| `BATON_PROGRESS_COLD_DAYS` | `7` | Days an archived progress file stays in the readily-accessible recent tier before the cleanup cron moves it to cold storage. Age is read from the write timestamp embedded in the filename, not from mtime. |
 | `BATON_TMP_TTL_HOURS` | `24` | Age before `/tmp` stragglers are swept by the cleanup cron. |
 | `BATON_SWEEP_INTERVAL_HOURS` | `48` | Self-throttle interval for the cleanup sweep (the `--if-due` gate in `cleanup-cron.sh`). **Does not set cron frequency** - `install-cron.sh` prints a fixed `0 0 */2 * *` crontab line (every two days); this var only gates whether an invoked sweep actually runs. |
 | `BATON_CRON_LOG` | `$HOME/.cache/baton/cron.log` | Where the cleanup cron writes its log. |
@@ -372,12 +434,15 @@ Pruned workstreams move to:
 ```
 $BATON_ARCHIVE_DIR/
 ├── progress/
-│   └── YYYY-MM/
-│       └── progress-<basename>.md        # checkpoint-write-trigger.sh
+│   └── YYYY-MM/                                # month the file was ARCHIVED, not written
+│       └── progress-<ws>-<hash>-<writets>.md   # checkpoint-write-trigger.sh
+├── progress-cold/
+│   └── YYYY-MM/                                # the same archive month, carried over by the move
+│       └── progress-<ws>-<hash>-<writets>.md   # cleanup-cron.sh Block 5
 └── checkpoint-state/
     └── YYYY-MM/
-        ├── workstreams/<ws>.json         # workstream-lib.sh::archive_workstream
-        └── sessions-tracking/<sid>.json  # workstream-lib.sh::archive_session_tracking
+        ├── workstreams/<ws>.json               # workstream-lib.sh::archive_workstream
+        └── sessions-tracking/<sid>.json        # workstream-lib.sh::archive_session_tracking
 ```
 
 Note the two roots: **progress** markdown archives under
@@ -386,7 +451,24 @@ trigger), while **workstream** records and **per-session tracking** files
 archive under `$BATON_ARCHIVE_DIR/checkpoint-state/YYYY-MM/{workstreams,sessions-tracking}/`
 (written by the rolloff helpers).
 
-A known archived (idle >7d) workstream id can be restored with `tools/restore-workstream.sh <ws-id>`; there is no longer a built-in command to list archived records. Restoring an archived workstream copies the record back to `$BATON_DIR/workstreams/` and the progress file back to `$BATON_PROGRESS_DIR/`.
+Progress archives are two-tier. A checkpoint's superseded progress file lands in
+`progress/YYYY-MM/`; once its embedded write timestamp is older than
+`BATON_PROGRESS_COLD_DAYS` (default 7), the cleanup cron moves it to
+`progress-cold/YYYY-MM/`. The move is a plain `mv` with no compression, so both
+tiers are readable by the same tools, and the source partition is preserved.
+Archived filenames carry exactly one timestamp: the write time, which the
+basename already holds. A legacy basename written before per-checkpoint naming
+carries none, so the archiver appends one - that is the only case where the
+archive time appears in a name.
+
+The `YYYY-MM` partition is the month the file was **archived**, not the month it
+was written: the archiver derives it from the clock at archive time, not from the
+basename. The two differ for any file written near a month boundary, or archived
+long after it was written. The cold-tier move preserves whichever partition the
+file was already in rather than recomputing one, so `progress-cold/YYYY-MM/`
+carries that same archive month.
+
+A known archived (idle >7d) workstream id can be restored with `tools/restore-workstream.sh <ws-id>`; there is no longer a built-in command to list archived records. Restoring an archived workstream searches **both** progress archive tiers - `progress/YYYY-MM/` and `progress-cold/YYYY-MM/` - and copies the record back to `$BATON_DIR/workstreams/` and the progress file back to `$BATON_PROGRESS_DIR/`.
 
 ## Files
 
@@ -403,13 +485,13 @@ A known archived (idle >7d) workstream id can be restored with `tools/restore-wo
 | `.claude/hooks/lib/usage-tokens.sh`                | Yes | Shared 5-field token extractor for both cost-rollup hooks.             |
 | `lib/eventlog.sh`                                  | Yes | Tolerant event-log reader (`eventlog::stream` - drops malformed lines via `jq -cR 'fromjson? // empty'`) (CC20). |
 | `.claude/hooks/lib/workstream-lib.sh`              | Yes | Shared helpers: `term_hash`, `derive_display_name`, `log_event`, prune. |
-| `tools/cleanup-cron.sh`                            | Yes | 48h sweep - `/tmp` stragglers, archive rotation, dead workstreams.     |
+| `tools/cleanup-cron.sh`                            | Yes | 48h sweep - `/tmp` stragglers, two-tier progress archive, dead workstreams. |
 | `tools/repair-event-log.sh`                        | Yes | Backup-first repair - rewrites the event log dropping malformed lines (CC20). |
 | `$BATON_DIR/workstreams/<ws>.json`            | No (ephemeral) | Workstream record (progress file pointer + display name + phase). |
 | `$BATON_DIR/terminals/<hash>.json`            | No (ephemeral) | Per-terminal binding to a workstream.                              |
 | `$BATON_DIR/hook-events.jsonl`                | No (gitignored) | Forensic audit log written by `log_event`.                       |
 | `$BATON_PROGRESS_DIR/progress-*.md`           | No (ephemeral) | Current progress (hybrid MD + JSON). Default `$BATON_DIR/progress/`. |
-| `$BATON_ARCHIVE_DIR/<YYYY-MM>/`               | No (gitignored) | Archived progress files (>7d-idle workstreams). Default `$HOME/.local/share/baton/`. |
+| `$BATON_ARCHIVE_DIR/progress{,-cold}/<YYYY-MM>/` | No (gitignored) | Archived progress files, recent and cold tiers. Default `$HOME/.local/share/baton/`. |
 
 ## Troubleshooting
 

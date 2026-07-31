@@ -179,6 +179,17 @@ tmp_ttl_minutes() {
 # default; NOT the OS-cron cadence (that is BATON_CRON_SCHEDULE in tools/lib/cron-schedule.sh).
 sweep_interval_hours() { _cfg::get BATON_SWEEP_INTERVAL_HOURS 48; }
 
+# Cold-tier window for archived progress files (days). Single source for the
+# BATON_PROGRESS_COLD_DAYS default AND its non-integer clamp: _cfg::get can hand
+# back a hand-edited config.json value or a typo'd env var, and every consumer -
+# cleanup-cron.sh Block 5 and the dashboard's [TTLs] row - must agree on what the
+# gate actually uses (lib/config.sh:6-10).
+progress_cold_days() {
+  local d; d="$(_cfg::get BATON_PROGRESS_COLD_DAYS 7)"
+  case "$d" in ''|*[!0-9]*) d=7 ;; esac
+  echo "$d"
+}
+
 # (sticky helpers removed in v2 - see the checkpoint-system design (maintained internally))
 
 # Resolve a progress file to an existing path.
@@ -212,12 +223,17 @@ resolve_progress_file() {
     search_dirs=("$sessions_dir")
   fi
 
+  # Both fallbacks keep the LAST match, so a scaffold sharing its real file's
+  # timestamp would sort after it and win. _find_prior_progress and the
+  # write-trigger's rolloff lookup already exclude .scaffold.md; these two
+  # branches are the remaining gap, and this is the handoff-resolution path.
   # Fallback 1: newest progress file matching workstream name
   if [ -n "$ws" ]; then
     local found=""
     for _dir in "${search_dirs[@]}"; do
       for f in "$_dir"/progress-*.md; do
         [ -s "$f" ] || continue
+        case "$(basename "$f")" in *.scaffold.md) continue ;; esac
         case "$(basename "$f")" in
           *"$ws"*) found="$f" ;;
         esac
@@ -235,6 +251,7 @@ resolve_progress_file() {
     for _dir in "${search_dirs[@]}"; do
       for f in "$_dir"/progress-*.md; do
         [ -s "$f" ] || continue
+        case "$(basename "$f")" in *.scaffold.md) continue ;; esac
         case "$(basename "$f")" in
           *"$display"*) found="$f" ;;
         esac

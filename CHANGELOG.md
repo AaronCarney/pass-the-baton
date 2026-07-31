@@ -6,6 +6,125 @@ All notable changes to Pass the Baton are documented here. The format is based o
 
 ## [Unreleased]
 
+### Documentation
+
+- **Code alignment is still pending.** `context-checkpoint.sh` continues to
+  branch on `/tmp/baton-manual-<sid>` and never reads `auto_continue_mode`, so
+  the shipped behavior described under 0.5.0 remains what actually runs.
+
+## [0.5.1] - 2026-07-30
+
+### Added
+
+- **`verify-install.sh --target <dir>` now fails when the installed surface is
+  incomplete.** It proved the hooks were wired in `settings.json` but said
+  nothing about whether the skills and commands had landed in the target, so an
+  install missing them entirely still reported success. Both installers and the
+  verifier now take the skill list from one shared surface library
+  (`tools/lib/install-surface.sh`), and all three enumerate commands from
+  `commands/`, so what gets installed and what gets checked cannot drift apart.
+  The check runs only when `--target` is passed explicitly: without it the
+  target defaults to `$PWD`, which in a dev checkout is the repo itself and
+  carries no `.claude/commands/`.
+
+- **Two-tier progress archive with a cold tier
+  (`BATON_PROGRESS_COLD_DAYS`, default 7).** The cleanup cron now moves archived
+  progress files out of `progress/<YYYY-MM>/` into `progress-cold/<YYYY-MM>/`
+  once the write timestamp in the filename is older than that window, so the
+  recent tier stops growing without bound. Age is read from the basename and
+  never from mtime, because archiving rewrites mtime and an mtime-based sweep
+  would measure time-since-archival instead. Nothing is deleted and nothing is
+  compressed: the move is a plain `mv` that preserves the partition directory,
+  both tiers stay readable by the same tools, and
+  `tools/restore-workstream.sh` searches both. A file whose name carries no
+  parseable timestamp is left where it is and counted rather than guessed at,
+  and a failed move is now counted and named in the cron log instead of
+  producing a summary line identical to an idle sweep.
+
+### Fixed
+
+- **A settings-channel install now delivers the slash commands, and uninstall
+  removes them again.** `commands/` (`off.md`, `renew.md`, `snooze.md`) was
+  never copied into the target, so `/off`, `/renew` and `/snooze` were missing
+  for anyone who installed through `settings.json`, where they are addressed
+  bare rather than under the plugin's `/pass-the-baton:` namespace.
+  **Plugin-channel installs were unaffected** - a plugin's root-level
+  `commands/` is auto-discovered, and those users had the commands all along.
+  The key is deliberately still absent from `.claude-plugin/plugin.json`:
+  per the plugin reference's path-behavior rules a `commands` key replaces the
+  default scan rather than adding to it, which would break the discovery that
+  already works. `docs/install.md` now names commands among what an install
+  wires.
+
+- **Every checkpoint now writes to a fresh progress-file path.** The destination
+  was scoped per terminal only (`progress-<ws>-<term_hash>.md`), so the second
+  and later checkpoints of a terminal targeted a file that already existed.
+  Claude Code refuses a Write that overwrites a file the session has not Read,
+  so each of those checkpoints failed once, and the model recovered by reading
+  the whole stale progress file back in - at the one moment context is by
+  definition exhausted. None of that content was needed: the carry-forward is
+  already substituted into the pre-rendered scaffold. The path now carries a
+  timestamp (`progress-<ws>-<term_hash>-<ts>.md`, with a `-2`, `-3` suffix if two
+  fires land in the same second). Second effect, also wanted: with a distinct
+  name the prior file no longer matches `checkpoint-write-trigger.sh`'s
+  "skip the file just written" check, so it is archived instead of clobbered.
+  The basename keeps the `progress-<ws>-` prefix and the terminal hash, so the
+  cross-workstream guard and the archive-marking loop are unaffected.
+
+- **An archived progress file now carries one timestamp, not two.** A basename
+  that already held its write time was archived as
+  `progress-<ws>-<hash>-<writets>-<archivets>.md`; the archive time is now
+  appended only to a legacy name that carries none, where it is what keeps two
+  of them from colliding. The check that recognises an existing timestamp is
+  anchored to the end of the basename - unanchored, it matched the digits
+  embedded in a workstream id, so some legacy files were archived with no
+  timestamp at all, which left them able to collide inside one partition and
+  unreachable by the cold-tier sweep that parses a write time off the name.
+
+- **Stale scaffolds no longer follow a checkpoint into the archive or hijack a
+  handoff.** A scaffold left behind by a lint-blocked checkpoint is regenerable
+  and holds nothing the progress file lacks, so it is deleted rather than
+  archived as a `.scaffold-<ts>.md` file. `resolve_progress_file`'s two
+  name-matching fallbacks also skip scaffolds now: both keep the last match, so
+  a scaffold sharing its real file's timestamp sorted after it and won the
+  handoff-resolution path.
+
+### Documentation
+
+- **The dashboard's interactive `tui` mode is documented.** `docs/cli.md`,
+  `README.md` and the `/baton` skill now cover it, including its terminal
+  requirement and the bare command names, and a drift guard
+  (`test-dashboard-docs.sh`) checks those docs against the scripts so they
+  cannot silently fall out of step.
+
+- **Corrected the definition of "manual" and "automated" checkpoints, which had
+  been recorded against the wrong axis.** The two terms name the **modes the
+  user selects** through `auto_continue_mode` (manual = `off`, automatic =
+  `tmux`/`relaunch`). They do not name what armed a given checkpoint. A
+  threshold crossing happens in *both* modes, so the trigger can never
+  discriminate between them. An internal decisions record had glossed
+  "automated" as "(threshold-fired)" and "manual" as "(`/renew`)" and stamped it
+  authoritative, and that gloss propagated into 0.5.0's behavior and its
+  changelog entries below. The governing definition now lives in
+  `docs/context-baton.md` § Checkpoint Modes. In summary: the reminder belongs
+  only to a manual-mode threshold-fired checkpoint, begins only *after* the
+  progress file is written and the synopsis is given, and `/pass-the-baton:renew`
+  carries no reminder and no keep-or-clear question because invoking it is
+  already the decision to hand off.
+
+- **Checkpoint progress-file templates now require an attribution marker on
+  every Constraints/Blockers entry.** Each entry is marked OWNER (the user
+  stated it) or DERIVED (the model concluded it), and a DERIVED entry has to
+  carry the evidence that produced it, so the next session can re-check a rule
+  instead of inheriting it. The guidance also calls out self-stamping a
+  conclusion "authoritative" or "do not relitigate" as a failure mode, and
+  prefers a checkable fact over a prohibition. That much applies to all three
+  shipped templates (`factory`, `task`, `free`), which reach an install through
+  `share/templates/`. `factory` goes further: it names the evidence forms
+  (file:line, command output, commit), gives the fact-over-prohibition rule
+  worked examples ("no remote is configured" against "never push"), and asks
+  that a design rule be pointed at rather than paraphrased.
+
 ## [0.5.0] - 2026-07-25
 
 ### Added
@@ -47,6 +166,10 @@ All notable changes to Pass the Baton are documented here. The format is based o
   `clear` latches the done flag and hands off (the user is told to `/clear`). The
   outstanding-consent marker is reaped at `SessionEnd` and by the cron TTL sweep,
   so a question left unanswered never wedges the session.
+  **Superseded definition (see `[Unreleased]`):** "manual" here means
+  `/renew`-armed, which is the wrong axis. The keep-or-clear question belongs to
+  a manual-*mode* threshold-fired checkpoint, not to `/renew`, where the user has
+  already decided to hand off. This entry records what shipped, not the target.
 
 - **Manual checkpoints emit a handoff synopsis.** After a `/renew` save
   completes, the model reports in 2-4 sentences what state was captured, which
@@ -99,6 +222,10 @@ All notable changes to Pass the Baton are documented here. The format is based o
   never-written-checkpoint signal is likewise unaffected: `cleanup-on-exit.sh`
   still records `abandoned-pending` when a checkpoint outlives its session
   undelivered.
+  **Superseded definition (see `[Unreleased]`):** "automated" here means
+  threshold-fired, which is the wrong axis. A threshold crossing in manual mode
+  is exactly the case the reminder is *for*; only automatic mode should never
+  nag. This entry records what shipped, not the target.
 
 ### Fixed
 

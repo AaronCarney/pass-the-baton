@@ -12,6 +12,7 @@ When installed as a plugin the command is namespaced: `/pass-the-baton:baton`. T
 - See the current Pass the Baton config (`/baton` or `/baton show`)
 - Change a config value (`/baton set key=value`)
 - Switch progress-file template (`/baton set template=factory`)
+- Point the user at the interactive dashboard (`tools/baton-dashboard.sh tui`) - it needs a real terminal, so hand them the command rather than running it yourself
 
 ## Process
 
@@ -61,6 +62,8 @@ env-var > config.json > default precedence (`lib/config.sh`).
 | `BATON_WORKSTREAM_TTL_DAYS` | Integer ≥0 | `BATON_WORKSTREAM_TTL_DAYS=30` |
 | `BATON_TRACKING_TTL_DAYS` | Integer ≥0 | `BATON_TRACKING_TTL_DAYS=90` |
 | `BATON_TMP_TTL_HOURS` | Integer ≥0 | `BATON_TMP_TTL_HOURS=48` |
+| `BATON_SWEEP_INTERVAL_HOURS` | Integer ≥0 | `BATON_SWEEP_INTERVAL_HOURS=48` |
+| `BATON_PROGRESS_COLD_DAYS` | Integer ≥0 | `BATON_PROGRESS_COLD_DAYS=14` |
 
 **[Opt-ins]** - `0` or `1`
 
@@ -93,6 +96,18 @@ env-var > config.json > default precedence (`lib/config.sh`).
 | `BATON_STATUSLINE_COLOR_MODE` | One of: `off`, `solid`, `bands` | `BATON_STATUSLINE_COLOR_MODE=bands` |
 
 On validation failure, the driver prints an error to stderr and exits 1 without modifying the config.
+
+### TUI mode
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT:-$CLAUDE_PROJECT_DIR}/tools/baton-dashboard.sh" tui
+```
+
+A tabbed interactive dashboard: **Status** (context fill, threshold, auto-continue mode, whether a checkpoint is owed, bound session), **Config** (the editable keys `show` prints), **History** (the last 10 cost entries), **Workstreams** (tracked progress files). `1`-`4` switch tabs, `r` redraws, `q` quits. On the Config tab `up` / `down` move the cursor and `enter` edits the selected key through the same validation path as `set`.
+
+**Do not run this for the user.** The TUI requires stdin and stdout to both be real TTYs. A tool call has neither, so it falls back to plain `show` output - you would report a dashboard the user never saw. Give them the command to run in their own terminal instead.
+
+`BATON_DIR`, `BATON_PROJECT_DIR` and `template_version` are read-only and do not appear on the Config tab.
 
 ## Important
 

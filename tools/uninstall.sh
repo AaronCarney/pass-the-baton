@@ -8,6 +8,8 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 # shellcheck source=tools/lib/cron-schedule.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib/cron-schedule.sh"
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib/install-surface.sh"
 
 SETTINGS=""
 BATON_DIR_ARG=""
@@ -126,13 +128,40 @@ if [ -n "$TARGET_EXPLICIT" ]; then
 
   # 2c. Remove project-local skills copied by install step 4b.
   SKILLS_DIR="$TARGET_EXPLICIT/.claude/skills"
-  for _skill in baton install-baton; do
+  for _skill in "${INSTALL_SURFACE_SKILLS[@]}"; do
     if [ -e "$SKILLS_DIR/$_skill" ]; then
       rm -rf "${SKILLS_DIR:?}/$_skill"
       echo "OK: removed skill $_skill from $SKILLS_DIR"
     fi
   done
   unset _skill SKILLS_DIR
+
+  # 2d. Remove project-local commands copied by install step 4c. Enumerated from
+  # the repo's commands/ dir, never by globbing the target, so unrelated user
+  # commands living in the same directory survive.
+  #
+  # Removal is content-gated, not name-gated. Install step 4c skips a target file
+  # that already exists, so a user's own renew.md can share a name with a shipped
+  # command and never have been installed by baton at all. Deleting by name alone
+  # would destroy that file. Comparing contents against the repo's copy needs no
+  # install manifest and fails to the safe side: a command edited after install,
+  # or a same-name file baton never wrote, is kept and reported instead.
+  #
+  # md5sum rather than cmp: md5sum is a declared required dependency (install.sh
+  # step 1 dep check, docs/install.md Required table); cmp is not.
+  COMMANDS_DIR="$TARGET_EXPLICIT/.claude/commands"
+  for _cmd in "$REPO_DIR"/commands/*.md; do
+    [ -e "$_cmd" ] || continue
+    _cmd_base=$(basename "$_cmd")
+    [ -e "$COMMANDS_DIR/$_cmd_base" ] || continue
+    if [ -f "$COMMANDS_DIR/$_cmd_base" ] && [ "$(md5sum < "$_cmd")" = "$(md5sum < "$COMMANDS_DIR/$_cmd_base")" ]; then
+      rm -f "${COMMANDS_DIR:?}/$_cmd_base"
+      echo "OK: removed command $_cmd_base from $COMMANDS_DIR"
+    else
+      echo "NOTE: kept $COMMANDS_DIR/$_cmd_base - it differs from the shipped command, so it is not ours to remove"
+    fi
+  done
+  unset _cmd _cmd_base COMMANDS_DIR
 fi
 
 # 3. Archive checkpoint dir.

@@ -32,4 +32,6 @@ Section authoring:
 
 <<CONSTRAINTS_BLOCKERS>>
 
-<!-- Hard rules and soft constraints. Write "None" if empty - V8 rejects empty placeholders. -->
+<!-- Hard rules and soft constraints. Write "None" if empty - V8 rejects empty placeholders.
+Mark each entry OWNER (the user said it) or DERIVED (you concluded it), and give a DERIVED entry its evidence so the next session can re-check it. Do not invent absolutes the user never stated, and do not stamp your own conclusions "authoritative" or "do not relitigate" - this file is read as the owner's instruction. Prefer a checkable fact over a prohibition. -->
+

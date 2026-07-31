@@ -153,7 +153,21 @@ if [ "$_OK" = false ]; then
   # silently stripped, which is why the previous warning here never blocked.
   # PENDING stays set and DONE is never written, so the save is still owed.
   if [ -n "$WORKSTREAM" ]; then
+    # KNOWN NARROW PATH (E5 item 4, deliberately not fixed). If the scaffold is
+    # already gone, _WANT keeps the bare progress-<ws>-<term_hash>.md form - the
+    # collision-prone name the fresh-path change removed, since the timestamp is no
+    # longer derivable. Nothing is currently known to reach this path. The two
+    # candidate fixes, when it is worth doing: drop the fallback name and point the
+    # message at the injected checkpoint instruction instead, or synthesize a fresh
+    # timestamped name at that moment. Do not build scaffolding around it.
+    # The destination is per-checkpoint unique (context-checkpoint.sh stamps a
+    # timestamp), so it cannot be reconstructed from ws+term_hash. The live
+    # scaffold sits next to it and survives until a write lands, so derive the
+    # name from there; fall back to the bare per-terminal form only if the
+    # scaffold is gone, since a name is still better advice than none.
     _WANT="progress-${WORKSTREAM}-$(term_hash).md"
+    _WT_SCAF=$(ls -t "$(checkpoint_progress_dir "$PROJECT_DIR")"/progress-"${WORKSTREAM}"-"$(term_hash)"-*.scaffold.md 2>/dev/null | head -1)
+    [ -n "$_WT_SCAF" ] && _WANT="$(basename "${_WT_SCAF%.scaffold.md}").md"
     jq -n --arg bn "$_BN" --arg want "$_WANT" '{
       decision: "block",
       reason: ("CHECKPOINT NOT SAVED. The progress file was written to \"" + $bn + "\", which does not belong to the current workstream, so it was not registered as a handoff. Re-write the SAME content to \"" + $want + "\" in the progress directory. Do NOT tell the user to /clear until that write succeeds.")
@@ -308,8 +322,31 @@ if [ -f "$ARCHIVE_LIST" ]; then
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     [ "$(readlink -f "$f")" = "$(readlink -f "$ABS_FILE")" ] && continue
+    # Stale scaffolds (left by a lint-blocked checkpoint, whose success path never
+    # ran) are regenerable and hold no state the progress file lacks, so they are
+    # deleted rather than archived. Without this they land as <base>.scaffold-<ts>.md,
+    # because `basename "$f" .md` does not strip the .scaffold.md suffix. The
+    # producer's glob in context-checkpoint.sh matches them, which is how they
+    # arrive here at all.
+    case "$f" in
+      *.scaffold.md) rm -f "$f"; continue ;;
+    esac
     BASE=$(basename "$f" .md)
-    if ! mv "$f" "$ARCHIVE_DIR/${BASE}-${TIMESTAMP}.md" 2>/dev/null; then
+    # Exactly one timestamp per archived name. Post-fresh-path basenames already
+    # carry the WRITE timestamp, which is the accurate one; appending the archive
+    # time on top produced progress-<ws>-<hash>-<writets>-<archivets>.md. Legacy
+    # basenames written before the fresh-path change carry none, and the appended
+    # timestamp is the only thing keeping two of them from colliding here.
+    # The test must be anchored to the END of the basename: a legacy name is
+    # progress-<ws>-<hash>, and the ws id itself embeds -YYYYmmdd-HHMMSS-<6 hex>,
+    # so an unanchored match reads the ws id as a write timestamp and appends
+    # nothing. The optional -<n> tail is the same-second disambiguator.
+    if [[ "$BASE" =~ -[0-9]{8}-[0-9]{6}(-[0-9]+)?$ ]]; then
+      DEST="$BASE"
+    else
+      DEST="${BASE}-${TIMESTAMP}"
+    fi
+    if ! mv "$f" "$ARCHIVE_DIR/${DEST}.md" 2>/dev/null; then
       log_event "$PROJECT_DIR" checkpoint archive-failed \
         "session_id=$SESSION_ID" "file=$f" "dest=$ARCHIVE_DIR" 2>/dev/null || true
     fi

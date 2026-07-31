@@ -44,7 +44,7 @@ See [`context-baton.md` § Configuration](context-baton.md#configuration-env-var
 /plugin install pass-the-baton@pass-the-baton
 ```
 
-This wires the hooks + skills; the cleanup sweep runs automatically on session start (no cron needed). Restart Claude Code so the hooks load. The optional statusline indicator and interactive directory setup are not part of the plugin install - use the `install-baton` skill or the manual steps below for those.
+This wires the hooks, skills, and commands; the cleanup sweep runs automatically on session start (no cron needed). Restart Claude Code so the hooks load. The optional statusline indicator and interactive directory setup are not part of the plugin install - use the `install-baton` skill or the manual steps below for those.
 
 The manual `tools/install.sh` flow below remains supported as a non-plugin / scripted fallback.
 

@@ -60,7 +60,7 @@ The documented set covers:
 
 - Location knobs (`BATON_DIR`, `BATON_PROGRESS_DIR`, `BATON_ARCHIVE_DIR`, `BATON_PROJECT_DIR`).
 - Behavior knobs (`BATON_PCT_THRESHOLD`, `BATON_MAX_TERMINALS_PER_WORKSTREAM` - opt-in co-tenancy cap, default 0 = unlimited).
-- Retention knobs (`BATON_WORKSTREAM_TTL_DAYS`, `BATON_TRACKING_TTL_DAYS`).
+- Retention knobs (`BATON_WORKSTREAM_TTL_DAYS`, `BATON_TRACKING_TTL_DAYS`, `BATON_PROGRESS_COLD_DAYS`).
 - Display knobs (`BATON_DISPLAY_NAME`).
 - Event-log knobs (`BATON_COLLECT`, `BATON_EVENT_LOG`, `BATON_EVENT_LOG_DISABLE`).
 - Observability opt-ins (`BATON_TIMING`, `BATON_PREWARM`).

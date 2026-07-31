@@ -2,7 +2,7 @@
 # Periodic cleanup - runs every 48h via cron.
 # Handles artifacts NOT tied to a specific session:
 # - /tmp stragglers from crashed sessions (24h)
-# - Progress archive rotation (7 days → cold storage)
+# - Progress archive rotation to cold storage (BATON_PROGRESS_COLD_DAYS, default 7d)
 # - Stale workstream records (BATON_WORKSTREAM_TTL_DAYS, default 30d)
 # - Stale per-session tracking files (BATON_TRACKING_TTL_DAYS, default 7d)
 # - Orphaned terminal-state files (72h safety net)
@@ -164,7 +164,64 @@ for w in "$TRACKING/workstreams"/*.json; do
 done
 log "Block 4: archived $WS_ARCHIVED stale workstreams, skipped $WS_SKIPPED_INUSE in-use"
 
-# === Block 5: removed in E5a (T5) - write-trigger archives directly to $(archive_dir)/progress/<YYYY-MM>.
+# === Block 5: two-tier progress archive ===
+# Recent tier: $ARCHIVE_BASE/progress/<YYYY-MM>/  - written by checkpoint-write-trigger.sh.
+# Cold tier:   $ARCHIVE_BASE/progress-cold/<YYYY-MM>/ - a plain move, no compression, so
+# both tiers stay readable by the same tools with no decompression step anywhere.
+# The source partition directory is preserved, so no date arithmetic decides the
+# destination.
+#
+# Age comes from the write timestamp embedded in the basename, NEVER from mtime:
+# the archival move into the recent tier rewrites mtime, so an mtime-based sweep
+# would measure time-since-archival and never fire on a file that was archived
+# once and left alone. A basename with no parseable trailing timestamp is left in
+# place and counted, not guessed at.
+progress_write_epoch() {
+  local base="${1##*/}"
+  base="${base%.md}"
+  if [[ "$base" =~ -([0-9]{8})-([0-9]{6})(-[0-9]+)?$ ]]; then
+    local d="${BASH_REMATCH[1]}" t="${BASH_REMATCH[2]}"
+    date -d "${d:0:4}-${d:4:2}-${d:6:2} ${t:0:2}:${t:2:2}:${t:4:2}" +%s 2>/dev/null
+    return $?
+  fi
+  return 1
+}
+
+# The window and its non-integer clamp both come from progress_cold_days() in
+# workstream-lib.sh, which this script already sources. _cfg::get can hand back a
+# non-integer - a hand-edited config.json, a typo'd env var - and this script has no
+# `set -e`, so the arithmetic below would not abort on one; it would silently compute
+# a garbage cutoff. A local copy of the clamp here would put the rule in two places,
+# and the dashboard's [TTLs] row reads the same accessor, which is what keeps a shown
+# value from disagreeing with the gate (lib/config.sh:6-10).
+if ! command -v progress_cold_days >/dev/null 2>&1; then
+  log "FATAL: progress_cold_days is not defined in workstream-lib.sh - skipping Block 5"
+else
+PROG_COLD_DAYS=$(progress_cold_days)
+PROG_CUTOFF=$(( $(date +%s) - PROG_COLD_DAYS * 86400 ))
+COLD_MOVED=0
+COLD_SKIPPED=0
+# A failed move is counted and named, never swallowed: an unwritable or full cold
+# tier would otherwise log byte-identically to an idle sweep while the recent tier
+# grows unboundedly. The count is APPENDED to the summary line - the cron log is
+# grepped on its existing prefix, so the leading text must not be restructured.
+COLD_FAILED=0
+for pf in "$ARCHIVE_BASE/progress"/*/*.md; do
+  [ -f "$pf" ] || continue
+  PF_EPOCH=$(progress_write_epoch "$pf") || { COLD_SKIPPED=$((COLD_SKIPPED+1)); continue; }
+  [ -n "$PF_EPOCH" ] || { COLD_SKIPPED=$((COLD_SKIPPED+1)); continue; }
+  [ "$PF_EPOCH" -lt "$PROG_CUTOFF" ] || continue
+  PF_PART=$(basename "$(dirname "$pf")")
+  mkdir -p "$ARCHIVE_BASE/progress-cold/$PF_PART"
+  if mv "$pf" "$ARCHIVE_BASE/progress-cold/$PF_PART/" 2>/dev/null; then
+    COLD_MOVED=$((COLD_MOVED+1))
+  else
+    COLD_FAILED=$((COLD_FAILED+1))
+    log "WARN: cold-tier move failed for $pf"
+  fi
+done
+log "Block 5: moved $COLD_MOVED progress files to cold storage (older than ${PROG_COLD_DAYS}d), skipped $COLD_SKIPPED with no embedded write timestamp, $COLD_FAILED failed"
+fi
 
 # === Block 6: writer for cron-not-running probe (E5a reads .cron-last-run) ===
 CD=$(checkpoint_dir "$PROJECT_DIR")

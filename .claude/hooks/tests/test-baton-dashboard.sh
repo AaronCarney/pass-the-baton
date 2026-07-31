@@ -56,6 +56,12 @@ _acontains "$out" 'color' 'error mentions color'
 bash "$DASH" set BATON_STATUSLINE_COLOR_MODE=bands
 bash "$DASH" set BATON_TIMING=1
 bash "$DASH" set BATON_WORKSTREAM_TTL_DAYS=14
+# E5: BATON_PROGRESS_COLD_DAYS joins the integer-TTL allowlist, so `set` must
+# accept it and persist it. Without the allowlist entry the docs would present a
+# knob the supported config path rejects.
+bash "$DASH" set BATON_PROGRESS_COLD_DAYS=14 >/dev/null 2>&1
+_aeq 0 "$?" 'set BATON_PROGRESS_COLD_DAYS accepted'
+_aeq 14 "$(jq -r '.BATON_PROGRESS_COLD_DAYS // empty' "$XDG_CONFIG_HOME/baton/config.json")" 'cold-days persisted'
 show_out=$(bash "$DASH" show)
 _acontains "$show_out" 'bands' 'bands stored'
 _acontains "$show_out" 'BATON_TIMING' 'opt-in stored'
@@ -474,7 +480,7 @@ _acontains "$tui_fb" 'baton config' 'tui falls back to show without a TTY'
 
   # T3: config pane excludes the 3 read-only rows (BATON_DIR, BATON_PROJECT_DIR, template_version).
   n=$(_tui_cfg_count)
-  [ "$n" = 28 ] || { echo "FAIL: expected 28 editable keys, got $n" >&2; exit 3; }
+  [ "$n" = 29 ] || { echo "FAIL: expected 29 editable keys, got $n" >&2; exit 3; }
   rows=$(_tui_config_rows | cut -f1)
   case "$rows" in *BATON_DIR*|*template_version*) echo 'FAIL: read-only key leaked into editable rows' >&2; exit 3;; esac
   [ "$(_tui_cfg_key_at 0)" = template ] || { echo 'FAIL: key@0 != template' >&2; exit 3; }
